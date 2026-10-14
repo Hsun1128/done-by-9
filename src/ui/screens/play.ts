@@ -1,7 +1,8 @@
 import { CARE_TEXT } from '../../data/selfcare';
 import { formatClock, minutesUntilEnd, dayProgress } from '../../engine/clock';
 import { BLADDER_DISTRACTED, BREATH_MINUTES, MONEY_STRESS_BELOW } from '../../engine/constants';
-import { careAt, careStatus, interactionAt } from '../../engine/game';
+import { CHORE_META } from '../../data/chores';
+import { careAt, careStatus, choreAt, interactionAt } from '../../engine/game';
 import { KIDS } from '../../data/meta';
 import { eventById } from '../../data/deck';
 import { ZONES } from '../../engine/world';
@@ -29,6 +30,7 @@ export interface PlayHandlers {
   readonly onLeave: () => void;
   readonly onCare: (care: CareId) => void;
   readonly onBreathe: () => void;
+  readonly onChore: () => void;
   readonly onGuide: () => void;
   readonly onContinue: () => void;
   readonly onFinish: () => void;
@@ -177,6 +179,7 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
 
     const interaction = interactionAt(game);
     const cares = careAt(game);
+    const offer = choreAt(game);
     dock.set(
       [
         game.at ?? 'walking',
@@ -184,6 +187,7 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
         'eventId' in interaction ? interaction.eventId : '',
         'kid' in interaction ? interaction.kid : '',
         cares.map((care) => `${care}:${careStatus(game, care)}`).join(','),
+        offer === null ? '' : `${offer.task}:${offer.kids.join('+')}`,
         game.pending === null ? 'free' : 'talking',
       ].join('|'),
       () => {
@@ -221,6 +225,16 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
               ),
             );
             break;
+        }
+        if (offer !== null) {
+          const meta = CHORE_META[offer.task];
+          buttons.push(
+            h(
+              'button',
+              { className: 'primary primary--chore', onClick: handlers.onChore },
+              `🧑‍🍳 ${meta.button}${offer.kids.length > 1 ? '（兩個一起）' : ''} (F)`,
+            ),
+          );
         }
         for (const care of cares) {
           const text = CARE_TEXT[care];

@@ -58,18 +58,25 @@ describe('routes', () => {
     }
   });
 
+  it('has to go through a doorway to leave a room, never through the wall', () => {
+    // The kids' room and the bathroom share a wall; the only way between them is round through the living room.
+    const route = planPath(ZONES.desk.stand, ZONES.tub.stand);
+    expect(route.length).toBeGreaterThan(1);
+    expect(route.some((point) => point.x < 5.1)).toBe(true);
+  });
+
   it('takes the straight line when nothing is in the way', () => {
     expect(planPath(ZONES.table.stand, ZONES.ledger.stand)).toHaveLength(1);
   });
 
-  it('is never much longer than the straight-line distance', () => {
+  it('is never much longer than the straight-line distance, even when two doorways are in the way', () => {
     for (const from of ZONE_IDS) {
       for (const to of ZONE_IDS) {
         const length = planPath(ZONES[from].stand, ZONES[to].stand).reduce(
           (sum, point, i, all) => sum + distance(i === 0 ? ZONES[from].stand : (all[i - 1] ?? point), point),
           0,
         );
-        expect(length, `${from} to ${to}`).toBeLessThan(distance(ZONES[from].stand, ZONES[to].stand) * 2.2 + 0.1);
+        expect(length, `${from} to ${to}`).toBeLessThan(distance(ZONES[from].stand, ZONES[to].stand) * 2.6 + 0.1);
       }
     }
   });

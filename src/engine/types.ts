@@ -16,9 +16,31 @@ export type TaskId = (typeof TASK_ORDER)[number];
 export const STYLE_IDS = ['nag', 'do_for', 'offer_choice', 'wait', 'together'] as const;
 export type Style = (typeof STYLE_IDS)[number];
 
-/** Rooms of the home. One per task, plus the sofa (rest) and the family-budget table. */
-export const ZONE_IDS = ['table', 'desk', 'sink', 'tub', 'door', 'sofa', 'ledger'] as const;
+/**
+ * Places in the world. Indoors: one per task, plus rest, play, bed, laundry and the family-budget
+ * table. Outdoors: the shops, the park and the school gate, each a real walk from the front door.
+ */
+export const ZONE_IDS = [
+  'table',
+  'desk',
+  'sink',
+  'tub',
+  'door',
+  'sofa',
+  'ledger',
+  'toys',
+  'bed',
+  'laundry',
+  'market',
+  'pharmacy',
+  'park',
+  'school',
+] as const;
 export type ZoneId = (typeof ZONE_IDS)[number];
+
+/** The small games played at a chore. Each turns skill into a score from 0 to 1. */
+export const MINIGAME_IDS = ['cook', 'scrub', 'quiz', 'pack'] as const;
+export type MinigameId = (typeof MINIGAME_IDS)[number];
 
 /** Things the parent can do for themselves. Each is available in exactly one room. */
 export const CARE_IDS = ['eat', 'rest', 'coffee', 'toilet'] as const;
@@ -162,6 +184,8 @@ export interface GameState {
   readonly at: ZoneId | null;
   /** Fraction of a game minute already walked but not yet charged. */
   readonly walkRemainder: number;
+  /** Score (0-1) of every chore done by hand, for the result screen. */
+  readonly choreScores: readonly number[];
   readonly open: readonly OpenEvent[];
   /** Ids of scripted events already shown. */
   readonly seenEvents: readonly string[];
@@ -189,6 +213,8 @@ export type PlayerAction =
   | { readonly kind: 'choose'; readonly choiceId: string }
   | { readonly kind: 'care'; readonly care: CareId }
   | { readonly kind: 'breathe' }
+  /** Do the chore of the task in this room by hand. `score` (0-1) is how well the little game went. */
+  | { readonly kind: 'chore'; readonly score: number }
   /** Close the conversation without choosing. Costs no time. */
   | { readonly kind: 'leave' };
 
@@ -199,6 +225,14 @@ export type Interaction =
   | { readonly kind: 'blocked'; readonly zone: ZoneId; readonly eventId: string }
   | { readonly kind: 'event'; readonly eventId: string; readonly urgent: boolean }
   | { readonly kind: 'checkin'; readonly kid: KidId };
+
+/** A chore the parent can do by hand in the current room. */
+export interface ChoreOffer {
+  readonly task: TaskId;
+  readonly game: MinigameId;
+  /** The kids who are waiting on this very task here; each one gets the progress. */
+  readonly kids: readonly KidId[];
+}
 
 /** Where to send the player next, and why. */
 export interface NextUp {

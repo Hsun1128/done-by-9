@@ -9,8 +9,8 @@ import {
   distance,
   kidPoint,
   nearestZone,
-  travelUnits,
 } from './world';
+import { travelUnits } from './pathing';
 
 describe('the home', () => {
   it('has a standing spot for every zone, inside the walkable bounds and outside the furniture', () => {
@@ -39,6 +39,22 @@ describe('the home', () => {
           INTERACT_RADIUS,
         );
       }
+    }
+  });
+});
+
+describe('the neighbourhood', () => {
+  it('makes every outdoor place a real walk from the front door', () => {
+    for (const id of ZONE_IDS) {
+      if (!ZONES[id].outdoor) continue;
+      expect(travelUnits('door', id), id).toBeGreaterThan(8);
+    }
+  });
+
+  it('keeps every indoor place within a short walk of the front door', () => {
+    for (const id of ZONE_IDS) {
+      if (ZONES[id].outdoor) continue;
+      expect(travelUnits('door', id), id).toBeLessThan(15);
     }
   });
 });

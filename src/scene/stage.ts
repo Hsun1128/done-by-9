@@ -79,15 +79,22 @@ const LOOKS: Readonly<Record<KidId | 'parent', Look>> = {
 };
 
 /** Walking speed in room units per second. */
-const WALK_SPEED = 4.2;
-/** Camera framing for a 4:3 stage; narrower stages pull back to keep the room in view. */
-const CAMERA_HOME = new Vector3(2.4, 8.2, 11.2);
-const CAMERA_TARGET = new Vector3(-0.2, 0.9, -0.4);
+const WALK_SPEED = 5;
+/**
+ * Camera framing: the camera sits at a fixed offset from a focus point that follows the parent,
+ * so the world can be far larger than the screen. Narrower stages pull back to keep people in view.
+ */
+const CAMERA_OFFSET = new Vector3(3.6, 11.2, 15.4);
+const FOCUS_HEIGHT = 0.9;
+/** How quickly the camera catches up with the parent, per second. */
+const CAMERA_FOLLOW_RATE = 5;
 const REFERENCE_ASPECT = 1.3;
 
 interface Actor {
   readonly rig: Rig;
   readonly goal: Vector3;
+  /** Waypoints round walls and furniture on the way to `goal`; empty when the way is clear. */
+  route: Point[];
   goalYaw: number;
   pose: Parameters<typeof targetJoints>[0];
   mood: number;
@@ -97,7 +104,7 @@ interface Actor {
 function newActor(look: Look, start: Vector3): Actor {
   const rig = createCharacter(look);
   rig.root.position.copy(start);
-  return { rig, goal: start.clone(), goalYaw: 0, pose: 'idle', mood: 60, moving: false };
+  return { rig, goal: start.clone(), route: [], goalYaw: 0, pose: 'idle', mood: 60, moving: false };
 }
 
 /** Shortest signed difference between two angles. */
@@ -107,11 +114,19 @@ function angleDelta(from: number, to: number): number {
 
 function step(actor: Actor, t: number, dt: number, reducedMotion: boolean): void {
   const { root } = actor.rig;
-  const dx = actor.goal.x - root.position.x;
-  const dz = actor.goal.z - root.position.z;
+  let waypoint = actor.route[0];
+  while (waypoint !== undefined && Math.hypot(waypoint.x - root.position.x, waypoint.z - root.position.z) < 0.12) {
+    actor.route.shift();
+    waypoint = actor.route[0];
+  }
+  const goalX = waypoint?.x ?? actor.goal.x;
+  const goalZ = waypoint?.z ?? actor.goal.z;
+  const dx = goalX - root.position.x;
+  const dz = goalZ - root.position.z;
   const distance = Math.hypot(dx, dz);
 
   if (reducedMotion) {
+    actor.route = [];
     root.position.copy(actor.goal);
     root.rotation.y = actor.goalYaw;
     actor.moving = false;
@@ -253,16 +268,16 @@ export function createStage(events: StageEvents): Stage {
   const sun = new DirectionalLight(0xfff0dc, 1.2);
   sun.position.set(-5, 10, 8);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -8;
-  sun.shadow.camera.right = 8;
-  sun.shadow.camera.top = 8;
-  sun.shadow.camera.bottom = -8;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -11;
+  sun.shadow.camera.right = 11;
+  sun.shadow.camera.top = 11;
+  sun.shadow.camera.bottom = -11;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 30;
   const lamp = new PointLight(0xffc27a, 20, 0, 1.6);
   lamp.position.set(0, 3.9, 0.5);
-  scene.add(ambient, sun, lamp);
+  scene.add(ambient, sun, sun.target, lamp);
 
   const camera = new PerspectiveCamera(38, REFERENCE_ASPECT, 0.1, 60);
 
@@ -397,16 +412,26 @@ export function createStage(events: StageEvents): Stage {
     return moved > 0;
   }
 
+  const focus = new Vector3(START_POINT.x, FOCUS_HEIGHT, START_POINT.z);
+  let pullBack = 1;
+
+  function placeCamera(): void {
+    camera.position.copy(focus).addScaledVector(CAMERA_OFFSET, pullBack);
+    camera.lookAt(focus);
+    sun.position.set(focus.x - 5, 10, focus.z + 8);
+    sun.target.position.set(focus.x, 0, focus.z);
+    lamp.position.set(focus.x, 3.9, focus.z + 0.5);
+  }
+
   function resize(): void {
     const width = Math.max(1, element.clientWidth);
     const height = Math.max(1, element.clientHeight);
     renderer.setSize(width, height, false);
     const aspect = width / height;
     camera.aspect = aspect;
-    // Pull back on narrow stages so the room stays fully visible.
-    const pullBack = Math.max(1, REFERENCE_ASPECT / aspect);
-    camera.position.copy(CAMERA_TARGET).addScaledVector(CAMERA_HOME.clone().sub(CAMERA_TARGET), pullBack);
-    camera.lookAt(CAMERA_TARGET);
+    // Pull back on narrow stages so the people stay in view.
+    pullBack = Math.max(1, REFERENCE_ASPECT / aspect);
+    placeCamera();
     camera.updateProjectionMatrix();
   }
 
@@ -436,6 +461,11 @@ export function createStage(events: StageEvents): Stage {
       near = zone;
       events.onNear(zone);
     }
+
+    const follow = reduced ? 1 : 1 - Math.exp(-dt * CAMERA_FOLLOW_RATE);
+    focus.x += (position.x - focus.x) * follow;
+    focus.z += (position.z - focus.z) * follow;
+    placeCamera();
 
     const parent = actors.parent;
     parent.goal.set(position.x, 0, position.z);
@@ -480,8 +510,13 @@ export function createStage(events: StageEvents): Stage {
         const point = kidPoint(kid.zone, id);
         const actor = actors[id];
         if (spot !== null && point !== null) {
+          const moved = Math.hypot(actor.goal.x - point.x, actor.goal.z - point.z) > 0.05;
           actor.goal.set(point.x, spot.y, point.z);
           actor.goalYaw = spot.yaw;
+          if (moved) {
+            const here = nearestFree({ x: actor.rig.root.position.x, z: actor.rig.root.position.z });
+            actor.route = [...planPath(here, nearestFree(point))];
+          }
         }
         actor.pose = kid.pose;
         actor.mood = kid.mood;
@@ -546,6 +581,12 @@ export function createStage(events: StageEvents): Stage {
       unreported = 0;
       near = null;
       actors.parent.rig.root.position.set(START_POINT.x, 0, START_POINT.z);
+      focus.set(START_POINT.x, FOCUS_HEIGHT, START_POINT.z);
+      for (const id of KID_IDS) {
+        actors[id].route = [];
+        actors[id].rig.root.position.set(START_POINT.x + (id === 'elder' ? -0.5 : 0.5), 0, 3);
+        actors[id].goal.copy(actors[id].rig.root.position);
+      }
       events.onNear(nearestZone(position));
       near = nearestZone(position);
     },

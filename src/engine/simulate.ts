@@ -1,4 +1,4 @@
-import { act, careAt, careStatus, createGame, interactionAt, nextUp } from './game';
+import { act, careAt, careStatus, choreAt, createGame, interactionAt, nextUp } from './game';
 import { summarize } from './summary';
 import {
   type CareId,
@@ -10,7 +10,7 @@ import {
   type Summary,
   type ZoneId,
 } from './types';
-import { travelUnits } from './world';
+import { travelUnits } from './pathing';
 
 /** Picks one choice of an event. Used by balance tests and bots. */
 export type Chooser = (event: GameEvent, state: GameState) => EventChoice;
@@ -19,6 +19,8 @@ export interface Bot {
   readonly choose: Chooser;
   /** When true the bot eats, rests and goes to the toilet before the body forces it. */
   readonly looksAfterItself: boolean;
+  /** When set, the bot does chores by hand whenever it can, scoring this well (0-1). */
+  readonly chore?: number;
 }
 
 const MAX_STEPS = 4000;
@@ -60,6 +62,9 @@ export const thoughtful: Bot = {
     return pool[0] ?? first(event);
   },
 };
+
+/** A thoughtful player who also does the chores by hand, with the given skill (0 = hopeless, 1 = perfect). */
+export const handy = (skill: number): Bot => ({ ...thoughtful, chore: skill });
 
 /** Always the choice that saves the most minutes, whatever it costs. */
 export const buyTime: Bot = {
@@ -118,6 +123,8 @@ function step(state: GameState, bot: Bot): GameState {
   if (target === null) return act(state, { kind: 'breathe' });
   const there = state.at === target.zone ? state : goTo(state, target.zone);
   if (there.finished) return there;
+  const offer = choreAt(there);
+  if (bot.chore !== undefined && offer !== null) return act(there, { kind: 'chore', score: bot.chore });
   if (interactionAt(there).kind === 'none' || interactionAt(there).kind === 'blocked') {
     return act(there, { kind: 'breathe' });
   }

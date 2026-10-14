@@ -2,8 +2,9 @@
 
 A free 3D browser game about one day of taking care of two kids. 07:00 breakfast, your partner
 leaves for work, and you hold the house together until they walk back in at 21:00. You walk
-around a 3D home (WASD / arrows / tap the floor / on-screen stick), and everything costs
-something: **time, NT$, energy, patience, a full stomach and a bladder that never stops rising.**
+around a whole flat (living room, kids' room, bathroom, balcony) and out into the neighbourhood
+(supermarket, pharmacy, park, school gate) with WASD / arrows / tap the floor / an on-screen stick.
+Everything costs something: **time, NT$, energy, patience, a full stomach and a bladder that never stops rising.**
 
 Free, no login, mobile-first, Traditional Chinese, 3D (three.js; WebGL required, no 2D fallback).
 Characters and events are fictional.
@@ -37,10 +38,17 @@ cp .env.example .env   # VITE_SITE_URL, VITE_ANALYTICS_URL, VITE_CTA_URL
 | `E`                       | Talk to the kid / handle the event in this room.         |
 | `1`–`4`, `Esc`            | Pick a spoken line; leave without choosing (free).       |
 | `R`                       | Look after yourself here: eat, rest, coffee, toilet.     |
+| `F`                       | Do the chore by hand: a little game (cook, scrub, quiz, pack). |
 | `B`                       | Deep breath (patience back, 3 minutes).                  |
 
 * Each kid works through **breakfast → lunch → homework → dinner → dishes → bath → school bag**,
   and each task only opens at its own time (`TASK_RELEASE`); in between they play on the sofa.
+* **The world is big on purpose.** Walls and doorways are real (you route round them), the camera
+  follows you, and the shops, pharmacy, park and school are 8-25 metres from the front door: every
+  errand outside is minutes the kids spend without you.
+* **Chores are little games.** Cooking is timing, washing up and bathing are button-mashing, homework
+  is a few first-grade sums, packing the school bag is picking what tomorrow needs. A better score moves
+  every waiting kid further and leaves them happier; a botched one costs patience.
 * `!` markers: amber = someone or something wants you, blue = a kid has waited too long,
   **red = urgent** (fever, a bumped head): nothing else can be handled until it is.
 * Errands trade NT$ against minutes and energy (buy the shoes now, or lose an hour on the
@@ -65,7 +73,8 @@ touches the DOM or three.js.
 **Balance is tested, not guessed.** `src/engine/balance.test.ts` plays 40 seeded days per bot
 policy and asserts the intent: nagging or doing everything yourself never earns the quiet
 ending; waiting never finishes; no single gentle style wins; a mixed, thoughtful policy beats
-the best single style; buying time costs far more than saving pennies; a parent who never eats,
+the best single style; skilled hands at the chores beat clumsy ones and perfect chores alone still
+fail often; buying time costs far more than saving pennies; a parent who never eats,
 rests or goes to the toilet collapses and one who does not.
 
 All tunable numbers live in `src/engine/constants.ts` (documented) and `src/data/styles.ts`.
@@ -74,11 +83,15 @@ All tunable numbers live in `src/engine/constants.ts` (documented) and `src/data
 
 ```
 src/
-  engine/       types, constants, world geometry, game reducer, summary, bots (simulate.ts)
-  data/         content: check-ins, interruptions, errands, daytime events, endings, intro
-  scene/        3D: model.ts (pure state → view), movement.ts (collision, routing),
-                room.ts, character.ts, stage.ts (three.js; only file that touches WebGL)
-  ui/           vanilla-TS screens (home, intro, play, result), app controller, sound, share card
+  engine/       types, constants, world geometry (rooms, walls, shops), pathing (routes round walls),
+                game reducer, summary, bots (simulate.ts)
+  data/         content: check-ins, interruptions, errands, daytime and neighbourhood events,
+                chores, endings, intro
+  scene/        3D: model.ts (pure state → view), movement.ts (collision, input),
+                room.ts (the flat and the street), character.ts, stage.ts (three.js; the only
+                file that touches WebGL; the camera follows the parent)
+  ui/           vanilla-TS screens (home, intro, play, result), app controller, sound, share card,
+                minigames/ (logic.ts is the rules, overlay.ts draws them)
   telemetry/    anonymous, best-effort event tracker
   config.ts     typed, validated environment (zod)
   storage.ts    validated localStorage progress (save v2) with in-memory fallback

@@ -783,3 +783,132 @@ button:disabled {
     width: min(100%, 560px);
   }
 }
+
+/* --- Chore mini-games ---------------------------------------------------------- */
+.primary--chore {
+  background: #8fd0a0;
+  color: #17331f;
+}
+.minigame {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(14, 12, 28, 0.55);
+}
+.minigame__card {
+  width: min(100%, 460px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(24, 20, 44, 0.97);
+}
+.mg-big {
+  min-height: 64px;
+  font-size: 1.1rem;
+}
+.mg-status {
+  min-height: 1.4em;
+  margin: 0;
+  text-align: center;
+  color: var(--ink-soft);
+}
+.mg-note {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+.mg-cook,
+.mg-scrub,
+.mg-quiz,
+.mg-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mg-cook__bar {
+  position: relative;
+  height: 40px;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #7a2f2f 0%, #d98e3a 30%, #d98e3a 70%, #7a2f2f 100%);
+  overflow: hidden;
+}
+.mg-cook__sweet {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(124, 214, 140, 0.9);
+}
+.mg-cook__marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 8px;
+  margin-left: -4px;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+}
+.mg-track {
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.mg-track--thin {
+  height: 8px;
+}
+.mg-fill {
+  width: 0;
+  height: 100%;
+  background: #7cc4ff;
+  transition: width 0.08s linear;
+}
+.mg-fill--time {
+  width: 100%;
+  background: #f5a524;
+}
+.mg-bubbles {
+  min-height: 2.2em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 1.4rem;
+}
+.mg-prompt {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-align: center;
+}
+.mg-choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.mg-choice {
+  font-size: 1.3rem;
+  min-height: 64px;
+}
+.mg-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.mg-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  font-size: 0.78rem;
+}
+.mg-item__emoji {
+  font-size: 1.8rem;
+}
+.mg-item[aria-pressed='true'] {
+  outline: 3px solid #8fd0a0;
+  background: rgba(143, 208, 160, 0.25);
+}

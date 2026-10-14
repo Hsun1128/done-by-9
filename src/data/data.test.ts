@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_END_MIN, DAY_START_MIN, TASK_RELEASE } from '../engine/constants';
 import { KID_IDS, STYLE_IDS, TASK_ORDER, ZONE_IDS } from '../engine/types';
+import { ZONES } from '../engine/world';
 import { CHECKIN_EVENTS } from './checkins';
 import { OPENING_EVENT_ID } from './daytime';
 import { ALL_EVENTS, SPAWNABLE_EVENTS, eventById } from './deck';
@@ -59,6 +60,20 @@ describe('event deck integrity', () => {
     for (const event of errands) {
       const prices = new Set(event.choices.map((c) => `${c.money}/${c.minutes}`));
       expect(prices.size, `${event.id} offers a real trade`).toBeGreaterThan(1);
+    }
+  });
+
+  it('gives every place outside the home something to do there, so the walk is never for nothing', () => {
+    for (const id of ZONE_IDS) {
+      if (!ZONES[id].outdoor) continue;
+      const here = SPAWNABLE_EVENTS.filter((event) => event.zone === id);
+      expect(here.length, `${id} has an event`).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives the corners kids wander into (toys, bed, laundry) their own surprises', () => {
+    for (const id of ['toys', 'bed', 'laundry'] as const) {
+      expect(SPAWNABLE_EVENTS.some((event) => event.zone === id), id).toBe(true);
     }
   });
 

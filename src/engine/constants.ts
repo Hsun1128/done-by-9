@@ -1,4 +1,4 @@
-import type { CareId, TaskId, ZoneId } from './types';
+import type { CareId, MinigameId, TaskId, ZoneId } from './types';
 
 /** Every tunable number in the game lives here, named and documented. */
 
@@ -32,7 +32,7 @@ export const MONEY_START = 1500;
 
 // --- Walking ---------------------------------------------------------------
 /** Room units walked per game minute. Crossing the home (about 7 units) takes about 3 minutes. */
-export const WALK_UNITS_PER_MINUTE = 3.0;
+export const WALK_UNITS_PER_MINUTE = 4.5;
 
 // --- The parent's body -----------------------------------------------------
 export const ENERGY_DECAY_PER_MIN = 0.07;
@@ -82,8 +82,8 @@ export const PASSIVE_LOW_MOOD_FACTOR = 0.3;
 
 // --- Events ----------------------------------------------------------------
 /** Chance per game minute that an eligible scripted event appears. */
-export const SPAWN_CHANCE_PER_MIN = 0.04;
-export const MAX_OPEN_EVENTS = 3;
+export const SPAWN_CHANCE_PER_MIN = 0.055;
+export const MAX_OPEN_EVENTS = 4;
 /** A routine check-in shows this many of the five styles, chosen at random. */
 export const CHECKIN_CHOICE_COUNT = 4;
 
@@ -122,3 +122,32 @@ export const CARE: Readonly<Record<CareId, CareSpec>> = {
 
 /** Past this many coffees the next one does nothing: the evening is long enough already. */
 export const MAX_COFFEES = 2;
+
+/** Minutes a kid plays in one spot before wandering to the next. */
+export const IDLE_BLOCK_MIN = 40;
+
+/** What doing a chore by hand costs and earns. `progress` is `base` at a score of 0 and `base + bonus` at 1. */
+export interface ChoreSpec {
+  readonly game: MinigameId;
+  readonly minutes: number;
+  readonly energy: number;
+  readonly base: number;
+  readonly bonus: number;
+  /** Discipline a kid gains when you do this with them instead of for them. */
+  readonly discipline: number;
+}
+
+export const CHORES: Readonly<Record<TaskId, ChoreSpec>> = {
+  breakfast: { game: 'cook', minutes: 17, energy: -4, base: 25, bonus: 45, discipline: 0 },
+  lunch: { game: 'cook', minutes: 17, energy: -4, base: 25, bonus: 45, discipline: 0 },
+  dinner: { game: 'cook', minutes: 22, energy: -5, base: 25, bonus: 45, discipline: 0 },
+  homework: { game: 'quiz', minutes: 19, energy: -4, base: 20, bonus: 42, discipline: 3 },
+  dishes: { game: 'scrub', minutes: 17, energy: -5, base: 26, bonus: 46, discipline: 0 },
+  bath: { game: 'scrub', minutes: 19, energy: -5, base: 24, bonus: 46, discipline: 0 },
+  bag: { game: 'pack', minutes: 10, energy: -2, base: 28, bonus: 46, discipline: -1 },
+};
+
+/** Mood a kid gains from a well-done chore, and loses from a botched one. */
+export const CHORE_MOOD_SWING = 6;
+/** Patience change at a score of 1 (and the mirror image at 0). */
+export const CHORE_PATIENCE_SWING = 3;

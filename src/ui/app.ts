@@ -1,7 +1,8 @@
 import { INTRO_CARDS } from '../data/intro';
 import type { AppConfig } from '../config';
 import { dayProgress } from '../engine/clock';
-import { InvalidActionError, act, careAt, careStatus, createGame, interactionAt, nextUp, openViews } from '../engine/game';
+import { CHORE_META } from '../data/chores';
+import { InvalidActionError, act, careAt, careStatus, choreAt, createGame, interactionAt, nextUp, openViews } from '../engine/game';
 import { summarize } from '../engine/summary';
 import type { CareId, GameState, PlayerAction, Summary, ZoneId } from '../engine/types';
 import { deriveScene, reactionFor, type Reaction } from '../scene/model';
@@ -20,6 +21,7 @@ import { renderHome } from './screens/home';
 import { renderIntro, type IntroView } from './screens/intro';
 import { createPlayView, type Outcome, type PlayView } from './screens/play';
 import { renderResult, type ResultView } from './screens/result';
+import { startMinigame, type MinigameHandle } from './minigames/overlay';
 import { renderShareCard } from './shareCard';
 import type { Sound } from './sound';
 
@@ -72,6 +74,7 @@ export function mountApp(deps: AppDeps): () => void {
   let introView: IntroView | null = null;
   let playView: PlayView | null = null;
   let muted = false;
+  let minigame: MinigameHandle | null = null;
 
   // The day in progress; null outside the play screen.
   let game: GameState | null = null;
@@ -164,6 +167,7 @@ export function mountApp(deps: AppDeps): () => void {
       onLeave: leave,
       onCare: care,
       onBreathe: breathe,
+      onChore: chore,
       onGuide: showGuide,
       onContinue: proceed,
       onFinish: finishDay,
@@ -195,6 +199,41 @@ export function mountApp(deps: AppDeps): () => void {
     // The world may already have a card up (the day ended while talking); keep that one.
     outcome ??= result;
     sound.play(result.money !== 0 ? 'coin' : 'good');
+    refresh();
+  }
+
+  function closeMinigame(): void {
+    if (minigame === null) return;
+    minigame.dispose();
+    minigame.element.remove();
+    minigame = null;
+    refresh();
+  }
+
+  /** Opens the little game for the chore in this room. Time stands still until it ends. */
+  function chore(): void {
+    if (game === null || playView === null || outcome !== null || game.pending !== null || minigame !== null) return;
+    const offer = choreAt(game);
+    if (offer === null) return;
+    const meta = CHORE_META[offer.task];
+    sound.play('choose');
+    minigame = startMinigame({
+      game: offer.game,
+      title: meta.button,
+      hint: meta.hint,
+      reducedMotion: deps.reducedMotion(),
+      random: Math.random,
+      onDone: (score) => {
+        closeMinigame();
+        const next = step({ kind: 'chore', score });
+        if (next === null) return;
+        outcome ??= lastEntry(next);
+        sound.play(score >= 0.4 ? 'good' : 'bad');
+        refresh();
+      },
+      onCancel: closeMinigame,
+    });
+    playView.element.append(minigame.element);
     refresh();
   }
 
@@ -254,6 +293,7 @@ export function mountApp(deps: AppDeps): () => void {
       money: summary.money,
       collapses: summary.collapses,
     });
+    closeMinigame();
     game = null;
     go({ tag: 'result', summary });
   }
@@ -261,7 +301,7 @@ export function mountApp(deps: AppDeps): () => void {
   /** Keeps the 3D room and the play screen in step with the game. */
   function refresh(): void {
     if (screen.tag !== 'play' || game === null || playView === null) return;
-    const frozen = game.pending !== null || outcome !== null || game.finished;
+    const frozen = game.pending !== null || outcome !== null || game.finished || minigame !== null;
     stage.setFrozen(frozen);
     stage.update(deriveScene(game, reaction, guide));
     root.dataset['phase'] = phaseFor(screen, game);
@@ -277,6 +317,10 @@ export function mountApp(deps: AppDeps): () => void {
     if (screen.tag !== 'play' || game === null || event.ctrlKey || event.metaKey || event.altKey) return;
     sound.unlock();
     const key = event.key.toLowerCase();
+    if (minigame !== null) {
+      if (minigame.handleKey(key)) event.preventDefault();
+      return;
+    }
     if (outcome !== null) {
       if (key === 'e' || key === 'enter' || key === ' ') {
         event.preventDefault();
@@ -304,6 +348,9 @@ export function mountApp(deps: AppDeps): () => void {
         break;
       case 'b':
         breathe();
+        break;
+      case 'f':
+        chore();
         break;
       case 'r': {
         const first = careAt(game).find((id) => careStatus(game ?? homeGame, id) === 'ok');

@@ -3,11 +3,17 @@ import { CHECKIN_EVENTS, checkinFor } from './checkins';
 import { DAYTIME_EVENTS } from './daytime';
 import { ERRAND_EVENTS } from './errands';
 import { INTERRUPTION_EVENTS } from './interruptions';
+import { NEIGHBORHOOD_EVENTS } from './neighborhood';
 
 export { checkinFor };
 
 /** Scripted events that appear on their own through the day. */
-export const SPAWNABLE_EVENTS: readonly GameEvent[] = [...DAYTIME_EVENTS, ...INTERRUPTION_EVENTS, ...ERRAND_EVENTS];
+export const SPAWNABLE_EVENTS: readonly GameEvent[] = [
+  ...DAYTIME_EVENTS,
+  ...INTERRUPTION_EVENTS,
+  ...ERRAND_EVENTS,
+  ...NEIGHBORHOOD_EVENTS,
+];
 
 /** Every event in the game. */
 export const ALL_EVENTS: readonly GameEvent[] = [...CHECKIN_EVENTS, ...SPAWNABLE_EVENTS];

@@ -111,7 +111,7 @@ export function markersFor(game: GameState): readonly Marker[] {
   }));
   for (const id of KID_IDS) {
     if (!needsAttention(game, id)) continue;
-    const zone = kidZone(game.kids[id], game.clock);
+    const zone = kidZone(game.kids[id], game.clock, id);
     if (!markers.some((marker) => marker.zone === zone)) markers.push({ zone, kind: 'kid' });
   }
   return markers;
@@ -124,7 +124,7 @@ export function deriveScene(game: GameState, reaction: Reaction | null, target: 
     const kid = game.kids[id];
     const reacted = reaction !== null && reaction.kids.includes(id) ? reaction.style : null;
     kids[id] = {
-      zone: kidZone(kid, game.clock),
+      zone: kidZone(kid, game.clock, id),
       pose: poseFor(kid, game.clock, reacted),
       mood: kid.mood,
     };

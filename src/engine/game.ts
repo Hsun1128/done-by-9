@@ -1,5 +1,6 @@
 import { OPENING_EVENT_ID } from '../data/daytime';
 import { checkinFor, eventById, SPAWNABLE_EVENTS } from '../data/deck';
+import { choreText } from '../data/chores';
 import { KIDS, TASKS } from '../data/meta';
 import { REACTIONS } from '../data/reactions';
 import { CARE_TEXT, DOZE_TEXT } from '../data/selfcare';
@@ -14,12 +15,16 @@ import {
   BREATH_MINUTES,
   BREATH_PATIENCE_GAIN,
   CARE,
+  CHORES,
+  CHORE_MOOD_SWING,
+  CHORE_PATIENCE_SWING,
   CHECKIN_CHOICE_COUNT,
   COLLAPSE_ENERGY_GAIN,
   COLLAPSE_MINUTES,
   COLLAPSE_MOOD_COST,
   DAY_END_MIN,
   DAY_START_MIN,
+  IDLE_BLOCK_MIN,
   DISCIPLINE_START,
   ENERGY_DECAY_PER_MIN,
   ENERGY_START,
@@ -57,6 +62,7 @@ import {
   KID_IDS,
   TASK_ORDER,
   type CareId,
+  type ChoreOffer,
   type EventChoice,
   type GameEvent,
   type GameState,
@@ -71,7 +77,7 @@ import {
   type TaskId,
   type ZoneId,
 } from './types';
-import { TASK_ZONE, ZONES } from './world';
+import { PLAY_ZONES, TASK_ZONE, ZONES } from './world';
 
 /** Thrown when the UI sends an action the current state cannot accept. */
 export class InvalidActionError extends Error {
@@ -111,10 +117,17 @@ export function allDone(state: Pick<GameState, 'kids' | 'clock'>): boolean {
   return KID_IDS.every((id) => nextTask(state.kids[id]) === null);
 }
 
-/** The room a kid is in: where their active task happens, or the sofa while playing or finished. */
-export function kidZone(kid: KidState, clock: number): ZoneId {
+/** Where a kid with nothing to do is playing: they drift between the sofa and the toy corner. */
+export function idleZone(id: KidId, clock: number): ZoneId {
+  const block = Math.floor(Math.max(0, clock - DAY_START_MIN) / IDLE_BLOCK_MIN);
+  const pick = id === 'elder' ? block : block + (block >> 1);
+  return PLAY_ZONES[pick % PLAY_ZONES.length] ?? 'sofa';
+}
+
+/** The room a kid is in: where their active task happens, or where they play while waiting or finished. */
+export function kidZone(kid: KidState, clock: number, id: KidId): ZoneId {
   const task = activeTask(kid, clock);
-  return task === null ? 'sofa' : TASK_ZONE[task];
+  return task === null ? idleZone(id, clock) : TASK_ZONE[task];
 }
 
 /** The room an event is in: its fixed room, else the room of whoever it is about. */
@@ -124,7 +137,7 @@ export function zoneOfEvent(event: GameEvent, state: Pick<GameState, 'kids' | 'c
     case 'task':
       return TASK_ZONE[event.target.task];
     case 'kid':
-      return kidZone(state.kids[event.target.kid], state.clock);
+      return kidZone(state.kids[event.target.kid], state.clock, event.target.kid);
     case 'family':
       return 'sofa';
   }
@@ -187,6 +200,23 @@ export function interactionAt(state: GameState): Interaction {
   if (here !== undefined) return { kind: 'event', eventId: here.event.id, urgent: here.urgent };
   const kid = checkinKidAt(state, zone);
   return kid === null ? { kind: 'none' } : { kind: 'checkin', kid };
+}
+
+/** The chore the parent could do by hand here, or null. Every kid waiting on that same task here gets the progress. */
+export function choreAt(state: GameState): ChoreOffer | null {
+  const zone = state.at;
+  if (state.finished || state.pending !== null || zone === null) return null;
+  const urgent = openViews(state).find((view) => view.urgent);
+  if (urgent !== undefined && urgent.zone !== zone) return null;
+  const here = KID_IDS.flatMap((id) => {
+    const task = activeTask(state.kids[id], state.clock);
+    return task !== null && TASK_ZONE[task] === zone ? [{ id, task }] : [];
+  });
+  const first = here[0];
+  if (first === undefined) return null;
+  // Both kids can be at the table at once, on different tasks; do the one that is behind.
+  const task = [...here].sort((a, b) => totalProgress(state.kids[a.id]) - totalProgress(state.kids[b.id]))[0]?.task ?? first.task;
+  return { task, game: CHORES[task].game, kids: here.filter((h) => h.task === task).map((h) => h.id) };
 }
 
 export type CareStatus = 'ok' | 'not_needed' | 'used_up';
@@ -276,6 +306,7 @@ export function createGame(seed: number): GameState {
     kids: { elder: newKid(), younger: newKid() },
     at: null,
     walkRemainder: 0,
+    choreScores: [],
     open: [{ eventId: OPENING_EVENT_ID, appeared: DAY_START_MIN, expires: DAY_START_MIN + 45 }],
     seenEvents: [OPENING_EVENT_ID],
     styleCounts: { nag: 0, do_for: 0, offer_choice: 0, wait: 0, together: 0 },
@@ -607,7 +638,7 @@ function care(state: GameState, careId: CareId): GameState {
   s.fullness = clamp(s.fullness + spec.fullness);
   s.bladder = clamp(s.bladder + spec.bladder);
   if (careId === 'coffee') s.coffees += 1;
-  if (careId === 'rest' && spec.bond > 0 && KID_IDS.some((id) => kidZone(s.kids[id], s.clock) === 'sofa')) {
+  if (careId === 'rest' && spec.bond > 0 && KID_IDS.some((id) => kidZone(s.kids[id], s.clock, id) === 'sofa')) {
     s.bond = clamp(s.bond + spec.bond);
   }
   log(s, {
@@ -637,6 +668,38 @@ function breathe(state: GameState): GameState {
   return s;
 }
 
+function chore(state: GameState, score: number): GameState {
+  requireNoEncounter(state, 'do a chore');
+  const offer = choreAt(state);
+  if (offer === null) throw new InvalidActionError('There is no chore to do here');
+  if (!Number.isFinite(score) || score < 0 || score > 1) {
+    throw new InvalidActionError(`A chore score is between 0 and 1, not ${score}`);
+  }
+  const spec = CHORES[offer.task];
+  const s = draftOf(state);
+  const gain = Math.round(spec.base + spec.bonus * score);
+  for (const id of offer.kids) {
+    const kid = s.kids[id];
+    kid.progress[offer.task] = clamp(kid.progress[offer.task] + gain);
+    kid.mood = clamp(kid.mood + Math.round(CHORE_MOOD_SWING * (score - 0.4)));
+    kid.discipline = clamp(kid.discipline + spec.discipline);
+    kid.lastAttended = s.clock;
+  }
+  s.energy = clamp(s.energy + spec.energy);
+  s.patience = clamp(s.patience + Math.round(CHORE_PATIENCE_SWING * (score - 0.5) * 2));
+  s.bond = clamp(s.bond + (spec.discipline > 0 ? 1 : 0));
+  s.choreScores.push(score);
+  log(s, {
+    eventId: `chore:${offer.task}`,
+    actionId: 'chore',
+    style: spec.discipline > 0 ? 'together' : 'do_for',
+    text: choreText(offer.task, score),
+    money: 0,
+  });
+  advance(s, spec.minutes);
+  return s;
+}
+
 /** Applies a player action. Throws `InvalidActionError` when the state cannot accept it. */
 export function act(state: GameState, action: PlayerAction): GameState {
   switch (action.kind) {
@@ -652,6 +715,8 @@ export function act(state: GameState, action: PlayerAction): GameState {
       return care(state, action.care);
     case 'breathe':
       return breathe(state);
+    case 'chore':
+      return chore(state, action.score);
     case 'leave':
       return state.pending === null ? state : { ...state, pending: null };
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alwaysStyle, buyTime, playGame, savePennies, selfless, thoughtful, type Bot } from './simulate';
+import { alwaysStyle, buyTime, handy, playGame, savePennies, selfless, thoughtful, type Bot } from './simulate';
 import type { Summary } from './types';
 
 const SEEDS = 40;
@@ -51,5 +51,14 @@ describe('balance over a whole day, 07:00 to 21:00 (bots play 40 seeded days)', 
   it('breaks a parent who never looks after themselves, but not one who does', () => {
     expect(mean(play(selfless), (s) => s.collapses)).toBeGreaterThan(0.5);
     expect(mean(thoughtfulRuns, (s) => s.collapses)).toBeLessThan(0.1);
+  });
+
+  it('rewards doing chores well: a skilled pair of hands beats a clumsy one, and hopeless ones never win', () => {
+    expect(share(play(handy(0.8)), quiet)).toBeGreaterThan(share(play(handy(0.3)), quiet));
+    expect(share(play(handy(0)), quiet)).toBe(0);
+  });
+
+  it('does not let chores trivialise the day: even perfect play fails often enough to matter', () => {
+    expect(share(play(handy(1)), quiet)).toBeLessThan(0.7);
   });
 });

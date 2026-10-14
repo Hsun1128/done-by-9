@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../config';
 import { SAVE_KEY, loadSave, type StorageLike } from '../storage';
 import type { TrackEvent, Tracker } from '../telemetry/analytics';
 import type { SceneView } from '../scene/model';
 import type { Stage, StageEvents } from '../scene/stage';
-import { travelUnits, ZONES } from '../engine/world';
+import { WALK_UNITS_PER_MINUTE } from '../engine/constants';
+import { travelUnits } from '../engine/pathing';
+import { ZONES } from '../engine/world';
 import type { ZoneId } from '../engine/types';
 import { mountApp } from './app';
 import { silentSound } from './sound';
@@ -156,7 +158,7 @@ describe('app flow', () => {
   it('walking costs time: the clock moves when the stage reports distance', () => {
     const { root, stageEvents } = setup();
     startDay(root);
-    stageEvents.onWalk(30);
+    stageEvents.onWalk(WALK_UNITS_PER_MINUTE * 10);
     expect(root.querySelector('.hud__clock')?.textContent).toBe('07:10');
   });
 
@@ -246,5 +248,47 @@ describe('app flow', () => {
 
   it('knows every zone the guide can send the parent to', () => {
     for (const zone of Object.keys(ZONES)) expect(ZONES[zone as ZoneId].label.length).toBeGreaterThan(0);
+  });
+});
+
+describe('doing a chore by hand', () => {
+  it('opens a little game at the table, stops the clock, and closes without cost when you give up', () => {
+    const { root, stageEvents } = setup();
+    startDay(root);
+    stageEvents.onNear('table');
+    const clockBefore = root.querySelector('.hud__clock')?.textContent;
+    press('f');
+    expect(root.querySelector('.minigame')).not.toBeNull();
+    expect(root.querySelector('.minigame [role="dialog"], .minigame')?.getAttribute('aria-label')).toBe('動手煮早餐');
+    press('Escape');
+    expect(root.querySelector('.minigame')).toBeNull();
+    expect(root.querySelector('.hud__clock')?.textContent).toBe(clockBefore);
+  });
+
+  it('does nothing where no kid is waiting for a task', () => {
+    const { root, stageEvents } = setup();
+    startDay(root);
+    stageEvents.onNear('laundry');
+    press('f');
+    expect(root.querySelector('.minigame')).toBeNull();
+  });
+
+  it('finishes a cooking game into a result card and moves the kids forward', () => {
+    const { root, stageEvents } = setup();
+    startDay(root);
+    stageEvents.onNear('table');
+    press('f');
+    // Three presses, each followed by the short pause before the next round.
+    vi.useFakeTimers();
+    try {
+      for (let round = 0; round < 3; round += 1) {
+        press(' ');
+        vi.advanceTimersByTime(1000);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(root.querySelector('.minigame')).toBeNull();
+    expect(root.querySelector('.sheet .outcome__text')?.textContent.length).toBeGreaterThan(5);
   });
 });

@@ -1,23 +1,7 @@
-import { OBSTACLES, WALK_BOUNDS, distance, type Box, type Point } from '../engine/world';
+import { distance, type Point } from '../engine/world';
+import { PLAYER_RADIUS, isBlocked, planPath, nearestFree } from '../engine/pathing';
 
-/** How wide the parent is. Furniture boxes are grown by this much before collision. */
-export const PLAYER_RADIUS = 0.3;
-
-const insideBox = (p: Point, box: Box, grow: number): boolean =>
-  p.x > box.minX - grow && p.x < box.maxX + grow && p.z > box.minZ - grow && p.z < box.maxZ + grow;
-
-/** True when a parent standing at `p` would be inside a wall or a piece of furniture. */
-export function isBlocked(p: Point): boolean {
-  if (
-    p.x < WALK_BOUNDS.minX + PLAYER_RADIUS ||
-    p.x > WALK_BOUNDS.maxX - PLAYER_RADIUS ||
-    p.z < WALK_BOUNDS.minZ + PLAYER_RADIUS ||
-    p.z > WALK_BOUNDS.maxZ - PLAYER_RADIUS
-  ) {
-    return true;
-  }
-  return OBSTACLES.some((box) => insideBox(p, box, PLAYER_RADIUS));
-}
+export { PLAYER_RADIUS, isBlocked, nearestFree, planPath };
 
 /**
  * Moves `from` by `delta`, sliding along walls and furniture: if the full move is blocked,
@@ -40,81 +24,6 @@ export function directionFromKeys(keys: ReadonlySet<string>): Point {
   const z = (pressed('s', 'arrowdown') ? 1 : 0) - (pressed('w', 'arrowup') ? 1 : 0);
   const length = Math.hypot(x, z);
   return length === 0 ? { x: 0, z: 0 } : { x: x / length, z: z / length };
-}
-
-/** Closest point to `p` that the parent can stand on, searching outward in small steps. */
-export function nearestFree(p: Point): Point {
-  if (!isBlocked(p)) return p;
-  for (let radius = 0.1; radius < 3; radius += 0.1) {
-    for (let i = 0; i < 16; i += 1) {
-      const angle = (i / 16) * Math.PI * 2;
-      const candidate = { x: p.x + Math.cos(angle) * radius, z: p.z + Math.sin(angle) * radius };
-      if (!isBlocked(candidate)) return candidate;
-    }
-  }
-  return p;
-}
-
-/** True when the straight segment between two points stays on free floor. */
-function clearLine(a: Point, b: Point): boolean {
-  const steps = Math.max(2, Math.ceil(distance(a, b) / 0.08));
-  for (let i = 1; i < steps; i += 1) {
-    const t = i / steps;
-    if (isBlocked({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t })) return false;
-  }
-  return true;
-}
-
-/** Corners of every piece of furniture, pushed just outside the collision margin. */
-const CORNERS: readonly Point[] = OBSTACLES.flatMap((box) => {
-  const m = PLAYER_RADIUS + 0.06;
-  return [
-    { x: box.minX - m, z: box.minZ - m },
-    { x: box.maxX + m, z: box.minZ - m },
-    { x: box.minX - m, z: box.maxZ + m },
-    { x: box.maxX + m, z: box.maxZ + m },
-  ];
-}).filter((p) => !isBlocked(p));
-
-/**
- * A route from `from` to `to` that goes around furniture: the shortest path through the
- * furniture corners (Dijkstra over a visibility graph). The last point is always `to`.
- */
-export function planPath(from: Point, to: Point): readonly Point[] {
-  if (clearLine(from, to)) return [to];
-  const nodes: readonly Point[] = [from, ...CORNERS, to];
-  const goal = nodes.length - 1;
-  const best = nodes.map(() => Number.POSITIVE_INFINITY);
-  const previous = nodes.map(() => -1);
-  const done = nodes.map(() => false);
-  best[0] = 0;
-  for (;;) {
-    let current = -1;
-    for (let i = 0; i < nodes.length; i += 1) {
-      if (!done[i] && (current === -1 || (best[i] ?? Infinity) < (best[current] ?? Infinity))) current = i;
-    }
-    if (current === -1 || (best[current] ?? Infinity) === Number.POSITIVE_INFINITY) break;
-    done[current] = true;
-    if (current === goal) break;
-    const here = nodes[current];
-    if (here === undefined) break;
-    for (let i = 0; i < nodes.length; i += 1) {
-      const there = nodes[i];
-      if (done[i] || there === undefined || !clearLine(here, there)) continue;
-      const cost = (best[current] ?? 0) + distance(here, there);
-      if (cost < (best[i] ?? Infinity)) {
-        best[i] = cost;
-        previous[i] = current;
-      }
-    }
-  }
-  const route: Point[] = [];
-  for (let at = goal; at > 0; at = previous[at] ?? -1) {
-    const node = nodes[at];
-    if (node === undefined || previous[at] === -1) return [to];
-    route.unshift(node);
-  }
-  return route;
 }
 
 export interface Follow {

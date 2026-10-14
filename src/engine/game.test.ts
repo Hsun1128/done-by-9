@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { eventById } from '../data/deck';
 import {
   CARE,
+  CHORES,
   COLLAPSE_MINUTES,
   DAY_END_MIN,
   DAY_START_MIN,
   FORCED_BREAK_MINUTES,
   MAX_COFFEES,
+  MAX_OPEN_EVENTS,
   MONEY_START,
   WALK_UNITS_PER_MINUTE,
 } from './constants';
@@ -17,6 +19,7 @@ import {
   careAt,
   careStatus,
   checkinKidAt,
+  choreAt,
   createGame,
   interactionAt,
   kidZone,
@@ -79,7 +82,7 @@ describe('a new day', () => {
     const noon = { ...createGame(1), clock: 11 * 60 };
     const fed = finishTask(finishTask(noon, 'elder', 'breakfast'), 'younger', 'breakfast');
     expect(activeTask(fed.kids.elder, fed.clock)).toBeNull();
-    expect(kidZone(fed.kids.elder, fed.clock)).toBe('sofa');
+    expect(kidZone(fed.kids.elder, fed.clock, 'elder')).toBe('sofa');
     expect(activeTask(fed.kids.elder, 12 * 60)).toBe('lunch');
   });
 });
@@ -96,7 +99,7 @@ describe('a new evening', () => {
 
   it('puts each kid at the table first and sends finished kids to the sofa', () => {
     const game = dinnerTime();
-    expect(kidZone(game.kids.elder, game.clock)).toBe('table');
+    expect(kidZone(game.kids.elder, game.clock, 'elder')).toBe('table');
     const done = finishTask(
       createGame(1),
       'elder',
@@ -109,7 +112,7 @@ describe('a new evening', () => {
       'bag',
     );
     expect(activeTask(done.kids.elder, done.clock)).toBeNull();
-    expect(kidZone(done.kids.elder, done.clock)).toBe('sofa');
+    expect(kidZone(done.kids.elder, done.clock, 'elder')).toBe('sofa');
   });
 });
 
@@ -286,7 +289,7 @@ describe('events', () => {
       let game = createGame(seed);
       for (let minute = 0; minute < 200 && !game.finished; minute += 1) {
         game = idle(game, 1);
-        expect(game.open.length).toBeLessThanOrEqual(3);
+        expect(game.open.length).toBeLessThanOrEqual(MAX_OPEN_EVENTS);
         expect(game.open.filter((o) => eventById(o.eventId).urgent).length).toBeLessThanOrEqual(1);
         for (const open of game.open) {
           const event = eventById(open.eventId);
@@ -446,5 +449,58 @@ describe('replay', () => {
     const run = (seed: number): number => idle(createGame(seed), 120).seenEvents.length;
     const counts = new Set(Array.from({ length: 12 }, (_, i) => run(i + 1)));
     expect(counts.size).toBeGreaterThan(1);
+  });
+});
+
+describe('doing a chore by hand', () => {
+  it('is offered at the table at dinner time, for both kids who are waiting there', () => {
+    const game = at(dinnerTime(), 'table');
+    expect(choreAt(game)).toEqual({ task: 'dinner', game: 'cook', kids: ['elder', 'younger'] });
+  });
+
+  it('is not offered where no kid is waiting, or while a conversation is open', () => {
+    expect(choreAt(at(dinnerTime(), 'tub'))).toBeNull();
+    expect(choreAt(at(dinnerTime(), null))).toBeNull();
+    const talking = act(at(dinnerTime(), 'table'), { kind: 'interact' });
+    expect(choreAt(talking)).toBeNull();
+  });
+
+  it('moves every waiting kid forward, and a better score moves them further', () => {
+    const game = at(dinnerTime(), 'table');
+    const poor = act(game, { kind: 'chore', score: 0 });
+    const great = act(game, { kind: 'chore', score: 1 });
+    expect(poor.kids.elder.progress.dinner).toBeGreaterThanOrEqual(CHORES.dinner.base);
+    expect(great.kids.elder.progress.dinner).toBeGreaterThan(poor.kids.elder.progress.dinner);
+    expect(great.kids.younger.progress.dinner).toBe(great.kids.elder.progress.dinner);
+  });
+
+  it('costs minutes and energy, and a botched job also costs patience and mood', () => {
+    const game = at(dinnerTime(), 'table');
+    const poor = act(game, { kind: 'chore', score: 0 });
+    const great = act(game, { kind: 'chore', score: 1 });
+    expect(poor.clock).toBeGreaterThan(game.clock);
+    expect(poor.energy).toBeLessThan(game.energy);
+    expect(poor.patience).toBeLessThan(great.patience);
+    expect(poor.kids.elder.mood).toBeLessThan(great.kids.elder.mood);
+  });
+
+  it('records the score for the result screen', () => {
+    const done = act(at(dinnerTime(), 'table'), { kind: 'chore', score: 0.8 });
+    expect(done.choreScores).toEqual([0.8]);
+  });
+
+  it('rejects an impossible score and a chore with nothing to do', () => {
+    const game = at(dinnerTime(), 'table');
+    expect(() => act(game, { kind: 'chore', score: 1.5 })).toThrow(InvalidActionError);
+    expect(() => act(game, { kind: 'chore', score: Number.NaN })).toThrow(InvalidActionError);
+    expect(() => act(at(dinnerTime(), 'tub'), { kind: 'chore', score: 1 })).toThrow(InvalidActionError);
+  });
+
+  it('is blocked while something urgent waits in another room', () => {
+    // The younger kid has finished dinner and is playing elsewhere; the fever is where she plays.
+    const base = finishTask(dinnerTime(), 'younger', 'dinner', 'dishes', 'bath', 'bag');
+    const urgent = withOpen(base, 'fever');
+    expect(urgent.at).not.toBe('table');
+    expect(choreAt({ ...urgent, at: 'table' })).toBeNull();
   });
 });
