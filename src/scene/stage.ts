@@ -31,6 +31,7 @@ import {
 import { KID_IDS, ZONE_IDS, type KidId, type ZoneId } from '../engine/types';
 import { START_POINT, WALK_BOUNDS, ZONES, kidPoint, nearestZone, type Point } from '../engine/world';
 import { skyAt, type Marker, type SceneView } from './model';
+import { createMinimap } from './minimap';
 import { createRoom } from './room';
 import {
   PLAYER_RADIUS,
@@ -247,6 +248,8 @@ export function createStage(events: StageEvents): Stage {
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', '家裡的 3D 場景：兩個孩子和你');
   element.append(canvas);
+  const minimap = createMinimap();
+  element.append(minimap.element);
 
   let renderer: WebGLRenderer;
   try {
@@ -309,6 +312,7 @@ export function createStage(events: StageEvents): Stage {
     kid: markerTexture('kid'),
   } as const;
   const markerSprites = new Map<ZoneId, Sprite>();
+  const shownMarkers = new Map<ZoneId, Marker['kind']>();
   for (const zone of ZONE_IDS) {
     const sprite = new Sprite(new SpriteMaterial({ map: markerTextures.event, transparent: true, depthTest: false }));
     sprite.scale.set(0.62, 0.62, 1);
@@ -490,6 +494,13 @@ export function createStage(events: StageEvents): Stage {
       ring.scale.setScalar(pulse);
     }
 
+    minimap.draw({
+      parent: position,
+      kids: KID_IDS.map((id) => ({ x: actors[id].rig.root.position.x, z: actors[id].rig.root.position.z })),
+      markers: [...shownMarkers].map(([zone, kind]) => ({ at: ZONES[zone].stand, kind })),
+      guide: guide === null ? null : ZONES[guide].stand,
+      pulse: reduced ? 0 : (Math.sin(clockTime * 5) + 1) / 2,
+    });
     renderer.render(scene, camera);
     frame = requestAnimationFrame(render);
   }
@@ -544,9 +555,11 @@ export function createStage(events: StageEvents): Stage {
         sprite.userData.kind = marker.kind;
         sprite.userData.baseY = markerAnchor(marker.zone).y;
         sprite.visible = true;
+        shownMarkers.set(marker.zone, marker.kind);
       }
       for (const [zone, sprite] of markerSprites) {
         if (!shown.has(zone)) {
+          shownMarkers.delete(zone);
           sprite.visible = false;
           sprite.userData.kind = undefined;
         }

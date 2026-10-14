@@ -912,3 +912,17 @@ button:disabled {
   outline: 3px solid #8fd0a0;
   background: rgba(143, 208, 160, 0.25);
 }
+
+/* --- Minimap -------------------------------------------------------------------- */
+.minimap {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: min(34%, 240px);
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(20, 24, 40, 0.35);
+  pointer-events: none;
+  z-index: 1;
+}
