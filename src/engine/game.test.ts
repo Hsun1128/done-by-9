@@ -9,6 +9,7 @@ import {
   FORCED_BREAK_MINUTES,
   MAX_COFFEES,
   MAX_OPEN_EVENTS,
+  MAX_OPEN_MESS,
   MONEY_START,
   WALK_UNITS_PER_MINUTE,
 } from './constants';
@@ -289,7 +290,7 @@ describe('events', () => {
       let game = createGame(seed);
       for (let minute = 0; minute < 200 && !game.finished; minute += 1) {
         game = idle(game, 1);
-        expect(game.open.length).toBeLessThanOrEqual(MAX_OPEN_EVENTS);
+        expect(game.open.length).toBeLessThanOrEqual(MAX_OPEN_EVENTS + MAX_OPEN_MESS);
         expect(game.open.filter((o) => eventById(o.eventId).urgent).length).toBeLessThanOrEqual(1);
         for (const open of game.open) {
           const event = eventById(open.eventId);
@@ -372,7 +373,8 @@ describe('looking after yourself', () => {
   it('rests on the sofa to win energy and patience back', () => {
     const tired = { ...at(createGame(1), 'sofa'), energy: 20, patience: 40 };
     const after = act(tired, { kind: 'care', care: 'rest' });
-    expect(after.energy).toBeGreaterThan(tired.energy + 10);
+    // A break can be cut short by the kids; even then it gives back at least half.
+    expect(after.energy).toBeGreaterThan(tired.energy + 5);
     expect(after.patience).toBeGreaterThan(tired.patience);
   });
 

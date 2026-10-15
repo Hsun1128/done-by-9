@@ -10,13 +10,27 @@ export const DAY_END_MIN = 21 * 60;
 /** When each task can begin. Before this a kid is playing, not waiting for the parent. */
 export const TASK_RELEASE: Readonly<Record<TaskId, number>> = {
   breakfast: 7 * 60,
-  lunch: 12 * 60,
-  homework: 15 * 60,
-  dinner: 18 * 60,
-  dishes: 18 * 60 + 45,
-  bath: 19 * 60 + 15,
-  bag: 20 * 60,
+  lunch: 11 * 60 + 30,
+  homework: 13 * 60 + 30,
+  dinner: 17 * 60,
+  dishes: 17 * 60 + 50,
+  bath: 18 * 60 + 40,
+  bag: 19 * 60 + 30,
 };
+
+/** Minutes after its release that a task is due. Past this, every waiting kid sours steadily. */
+export const TASK_DUE_AFTER: Readonly<Record<TaskId, number>> = {
+  breakfast: 90,
+  lunch: 90,
+  homework: 120,
+  dinner: 90,
+  dishes: 60,
+  bath: 60,
+  bag: 60,
+};
+
+/** Mood a kid loses per minute while their task is overdue. */
+export const OVERDUE_MOOD_LOSS_PER_MIN = 0.08;
 
 // --- Starting values -------------------------------------------------------
 export const PATIENCE_START = 100;
@@ -73,7 +87,7 @@ export const MONEY_DEBT_PATIENCE_COST = 4;
 export const MOOD_LOW = 30;
 export const LOW_MOOD_PENALTY = 0.7;
 /** Minutes without the parent before a kid starts to wait and a "!" appears over them. */
-export const ATTENTION_AFTER_MIN = 40;
+export const ATTENTION_AFTER_MIN = 25;
 /** Mood lost per minute once a kid has waited longer than the grace period. */
 export const UNATTENDED_MOOD_LOSS_PER_MIN = 0.05;
 /** Progress per minute a kid makes alone, before scaling by discipline (50 = x1) and mood. */
@@ -83,7 +97,35 @@ export const PASSIVE_LOW_MOOD_FACTOR = 0.3;
 // --- Events ----------------------------------------------------------------
 /** Chance per game minute that an eligible scripted event appears. */
 export const SPAWN_CHANCE_PER_MIN = 0.055;
-export const MAX_OPEN_EVENTS = 4;
+export const MAX_OPEN_EVENTS = 5;
+
+// --- Real time and interruptions ---------------------------------------------
+/**
+ * Game minutes per real second while the clock runs by itself. Equal to the walking
+ * speed (5 units/s) over WALK_UNITS_PER_MINUTE, so a walk costs the same in real time
+ * as the balance bots are charged for it.
+ */
+export const REALTIME_MINUTES_PER_SECOND = 5 / WALK_UNITS_PER_MINUTE;
+/** Chance per game minute that the kids make a mess of their own, whatever else is going on. */
+export const MESS_CHANCE_PER_MIN = 0.012;
+/** Mess events open at once. Interruptions forced onto the parent ignore this cap. */
+export const MAX_OPEN_MESS = 3;
+/** A mess event cannot come back until this many other events have appeared. */
+export const MESS_COOLDOWN = 8;
+/** Chance that taking care of yourself is cut short by the kids, per kind of care. */
+export const CARE_INTERRUPT_CHANCE: Readonly<Record<CareId, number>> = {
+  eat: 0.4,
+  rest: 0.55,
+  coffee: 0.4,
+  toilet: 0.35,
+};
+/** An interrupted break gives only this share of its minutes and benefit. */
+export const INTERRUPTED_SHARE = 0.5;
+/** Chance that a chore played by hand is interrupted halfway (decided by the app, not the engine). */
+export const CHORE_INTERRUPT_CHANCE = 0.6;
+/** Patience lost, and mood lost by each kid, when a call for help is ignored in the middle of a chore. */
+export const IGNORED_CALL_PATIENCE = 4;
+export const IGNORED_CALL_MOOD = 3;
 /** A routine check-in shows this many of the five styles, chosen at random. */
 export const CHECKIN_CHOICE_COUNT = 4;
 

@@ -57,7 +57,7 @@ function fakeStage(events: StageEvents) {
 
 let dispose: (() => void) | null = null;
 
-function setup() {
+function setup(minutesPerSecond = 0) {
   const root = document.createElement('div');
   document.body.replaceChildren(root);
   const events: TrackEvent[] = [];
@@ -81,6 +81,7 @@ function setup() {
     sound: silentSound,
     nextSeed: () => 2024,
     reducedMotion: () => true,
+    minutesPerSecond,
   });
   if (holder.fake === undefined) throw new Error('The app never built a stage');
   const built = holder.fake;
@@ -290,5 +291,82 @@ describe('doing a chore by hand', () => {
     }
     expect(root.querySelector('.minigame')).toBeNull();
     expect(root.querySelector('.sheet .outcome__text')?.textContent.length).toBeGreaterThan(5);
+  });
+});
+
+describe('real time', () => {
+  const advance = (ms: number): void => {
+    // The clock is polled a few times a second; step through it the way a browser would.
+    for (let elapsed = 0; elapsed < ms; elapsed += 250) vi.advanceTimersByTime(250);
+  };
+
+  const withClock = (run: () => void): void => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+    try {
+      run();
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  const minutesOf = (root: HTMLElement): number => {
+    const [h = 0, m = 0] = (root.querySelector('.hud__clock')?.textContent ?? '0:0').split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  it('keeps the clock running while the player does nothing', () => {
+    withClock(() => {
+      const { root } = setup(2);
+      startDay(root);
+      const before = minutesOf(root);
+      advance(10_000);
+      expect(minutesOf(root) - before).toBeGreaterThanOrEqual(15);
+    });
+  });
+
+  it('stands still while a conversation, a result card or a chore is open', () => {
+    withClock(() => {
+      const { root, stageEvents } = setup(2);
+      startDay(root);
+      stageEvents.onNear('table');
+      press('f');
+      const before = minutesOf(root);
+      advance(10_000);
+      expect(root.querySelector('.minigame')).not.toBeNull();
+      expect(minutesOf(root)).toBe(before);
+    });
+  });
+
+  it('does not charge walking twice: the stage walks, the clock is the only thing that spends time', () => {
+    withClock(() => {
+      const { root, stageEvents } = setup(2);
+      startDay(root);
+      const before = minutesOf(root);
+      stageEvents.onWalk(500);
+      expect(minutesOf(root)).toBe(before);
+    });
+  });
+
+  it('lists what needs the parent, and walks there when a row is tapped', () => {
+    const { root } = setup();
+    startDay(root);
+    const rows = root.querySelectorAll('.todo__row');
+    expect(rows.length).toBeGreaterThan(0);
+    const first = root.querySelector<HTMLButtonElement>('.todo__row');
+    const zone = first?.dataset['zone'];
+    first?.click();
+    expect(zone).toBeDefined();
+    // The fake stage arrives at once, so the dock now speaks about the room, not about walking.
+    expect(root.querySelector('.dock .primary')?.textContent).not.toContain('走近');
+  });
+
+  it('shows new trouble as a toast without stopping play', () => {
+    withClock(() => {
+      const { root } = setup(8);
+      startDay(root);
+      advance(15_000);
+      expect(root.querySelectorAll('.toast').length + root.querySelectorAll('.todo__row').length).toBeGreaterThan(0);
+      expect(root.querySelector('.sheet .outcome__text')).toBeNull();
+    });
   });
 });

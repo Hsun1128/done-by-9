@@ -32,7 +32,7 @@ cp .env.example .env   # VITE_SITE_URL, VITE_ANALYTICS_URL, VITE_CTA_URL
 
 | Input                     | Does                                                     |
 | ------------------------- | -------------------------------------------------------- |
-| WASD / arrows / stick     | Walk. Every unit walked costs game time.                 |
+| WASD / arrows / stick     | Walk. The clock never stops while you walk or stand.     |
 | Tap the floor             | Walk there, around the furniture.                        |
 | `G` or 帶我去              | Auto-walk to what matters next (red `!` first).          |
 | `E`                       | Talk to the kid / handle the event in this room.         |
@@ -41,6 +41,17 @@ cp .env.example .env   # VITE_SITE_URL, VITE_ANALYTICS_URL, VITE_CTA_URL
 | `F`                       | Do the chore by hand: a little game (cook, scrub, quiz, pack). |
 | `B`                       | Deep breath (patience back, 3 minutes).                  |
 
+* **The clock runs in real time** (about 1.1 game minutes per second; a day is roughly 10-12 minutes of
+  play). It stops only while you read a conversation, a result card or play a chore game; every choice and
+  chore then jumps it forward, so answering one thing lets the others run out.
+* **A live to-do list** sits beside the room: every open event with a shrinking bar, every kid's current
+  task with its due time and progress, and your own body when it is about to give out. Tap a row to be
+  walked there. Past its due time a task sours the kid every minute (`OVERDUE_MOOD_LOSS_PER_MIN`).
+* **You are always interrupted.** Household mishaps (spilled milk, a smashed bowl, sibling fights, a fall,
+  "I can't sleep", water over the bathroom floor, a burning pot, the class group chat) arrive at random
+  all day and can repeat. A rest or a meal is cut short about half the time and gives only half its benefit;
+  a chore game gets a "媽——!" halfway: drop it for half the progress, or ignore it and pay patience and mood.
+  Only one red alarm exists at a time; at most three mishaps wait at once on their own.
 * Each kid works through **breakfast → lunch → homework → dinner → dishes → bath → school bag**,
   and each task only opens at its own time (`TASK_RELEASE`); in between they play on the sofa.
 * **The world is big on purpose.** Walls and doorways are real (you route round them), the camera
@@ -73,7 +84,7 @@ touches the DOM or three.js.
 **Balance is tested, not guessed.** `src/engine/balance.test.ts` plays 40 seeded days per bot
 policy and asserts the intent: nagging or doing everything yourself never earns the quiet
 ending; waiting never finishes; no single gentle style wins; a mixed, thoughtful policy beats
-the best single style; skilled hands at the chores beat clumsy ones and perfect chores alone still
+the best single style (and `realtime.test.ts` pins the clock, the mishap deck, interruptions and the to-do order); skilled hands at the chores beat clumsy ones and perfect chores alone still
 fail often; buying time costs far more than saving pennies; a parent who never eats,
 rests or goes to the toilet collapses and one who does not.
 
@@ -84,8 +95,9 @@ All tunable numbers live in `src/engine/constants.ts` (documented) and `src/data
 ```
 src/
   engine/       types, constants, world geometry (rooms, walls, shops), pathing (routes round walls),
-                game reducer, summary, bots (simulate.ts)
-  data/         content: check-ins, interruptions, errands, daytime and neighbourhood events,
+                game reducer, to-do list (todo.ts), summary, bots (simulate.ts)
+  data/         content: check-ins, interruptions, household mishaps (mess.ts), errands, daytime and
+                neighbourhood events,
                 chores, endings, intro
   scene/        3D: model.ts (pure state → view), movement.ts (collision, input),
                 room.ts (the flat and the street), character.ts, stage.ts (three.js; the only

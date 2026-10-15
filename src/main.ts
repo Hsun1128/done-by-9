@@ -1,5 +1,6 @@
 import './style.css';
 import { parseConfig } from './config';
+import { REALTIME_MINUTES_PER_SECOND } from './engine/constants';
 import { createStage, StageUnavailableError } from './scene/stage';
 import { createSeedSource } from './seed';
 import { resolveStorage } from './storage';
@@ -35,6 +36,7 @@ try {
     sound,
     nextSeed: createSeedSource(window.location.search),
     reducedMotion,
+    minutesPerSecond: REALTIME_MINUTES_PER_SECOND,
   });
 } catch (error) {
   if (!(error instanceof StageUnavailableError)) throw error;

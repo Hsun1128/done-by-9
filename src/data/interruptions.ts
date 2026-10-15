@@ -29,6 +29,8 @@ export interface EventSpec {
   /** Fixed room; omitted means the target's room. */
   readonly zone?: ZoneId;
   readonly urgent?: boolean;
+  /** True for household mishaps that may happen again and again. */
+  readonly repeatable?: boolean;
   /** Minutes the event waits before it lapses. */
   readonly ttl?: number;
   readonly lapse?: Partial<Lapse>;
@@ -65,6 +67,7 @@ export function buildEvent(kind: 'interruption' | 'errand', spec: EventSpec): Ga
     target: spec.target,
     zone: spec.zone ?? null,
     urgent,
+    repeatable: spec.repeatable ?? false,
     ttl: spec.ttl ?? (urgent ? URGENT_TTL : DEFAULT_TTL),
     lapse: {
       text: spec.lapse?.text ?? `「${spec.title}」沒有人理，孩子自己撐了一陣子。`,

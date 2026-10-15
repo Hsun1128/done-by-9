@@ -1,10 +1,13 @@
 import { INTRO_CARDS } from '../data/intro';
 import type { AppConfig } from '../config';
 import { dayProgress } from '../engine/clock';
+import { CHORE_INTERRUPT_CHANCE } from '../engine/constants';
+import { CALL_LINES } from '../data/mess';
+import { ZONES } from '../engine/world';
 import { CHORE_META } from '../data/chores';
 import { InvalidActionError, act, careAt, careStatus, choreAt, createGame, interactionAt, nextUp, openViews } from '../engine/game';
 import { summarize } from '../engine/summary';
-import type { CareId, GameState, PlayerAction, Summary, ZoneId } from '../engine/types';
+import type { CareId, ChoreInterrupt, GameState, LogEntry, PlayerAction, Summary, ZoneId } from '../engine/types';
 import { deriveScene, reactionFor, type Reaction } from '../scene/model';
 import type { Stage, StageEvents } from '../scene/stage';
 import { buildShareText } from '../share';
@@ -37,6 +40,11 @@ export interface AppDeps {
   readonly nextSeed: () => number;
   /** True when the player asked their system for less motion: narration then appears at once. */
   readonly reducedMotion: () => boolean;
+  /**
+   * Game minutes that pass per real second while nobody is deciding anything. Zero turns the
+   * clock off: time then moves only when the player walks or acts (used by tests).
+   */
+  readonly minutesPerSecond: number;
 }
 
 type Screen =
@@ -60,8 +68,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '發生了未知的錯誤';
 }
 
-/** Log styles that interrupt play with a message: the world acted, not the player. */
-const WORLD_STYLES: ReadonlySet<string> = new Set(['lapse', 'doze', 'forced']);
+/** Log styles that stop play with a message card: the body gave out. */
+const WORLD_STYLES: ReadonlySet<string> = new Set(['doze', 'forced']);
+
+/** How often the real-time clock is checked, in milliseconds. */
+const CLOCK_CHECK_MS = 250;
+/** A tab that was asleep never charges more than this many real seconds at once. */
+const MAX_CLOCK_GAP_S = 0.5;
+/** A call for help in the middle of a chore appears this many real seconds in, at the earliest and latest. */
+const CALL_AT_S = { min: 2.5, max: 5.5 } as const;
+/** How long the call waits before the parent is taken to have ignored it. */
+const CALL_WAIT_MS = 7000;
+/** Score credited for the part of a chore done before leaving it. */
+const ANSWERED_SCORE = 0.5;
 
 /** Mounts the game into `deps.root`. Returns a function that removes its listeners and stops the stage. */
 export function mountApp(deps: AppDeps): () => void {
@@ -75,6 +94,14 @@ export function mountApp(deps: AppDeps): () => void {
   let playView: PlayView | null = null;
   let muted = false;
   let minigame: MinigameHandle | null = null;
+  /** The call for help that cut into the chore on screen. */
+  let call: { state: 'waiting' | ChoreInterrupt; banner: HTMLElement | null; timers: number[] } = {
+    state: 'none',
+    banner: null,
+    timers: [],
+  };
+  /** The first log entry written by the latest action: what the player just did. */
+  let latest: LogEntry | null = null;
 
   // The day in progress; null outside the play screen.
   let game: GameState | null = null;
@@ -85,7 +112,8 @@ export function mountApp(deps: AppDeps): () => void {
 
   const stage: Stage = deps.createStage({
     onWalk: (units) => {
-      step({ kind: 'walk', units });
+      // With a running clock, walking already costs real time; only the manual clock charges it here.
+      if (deps.minutesPerSecond <= 0) step({ kind: 'walk', units });
     },
     onNear: (zone) => {
       if (guide !== null && zone === guide) guide = null;
@@ -120,6 +148,7 @@ export function mountApp(deps: AppDeps): () => void {
       throw error;
     }
     game = next;
+    latest = next.log[before.log.length] ?? null;
     announce(before, next);
     refresh();
     return next;
@@ -131,6 +160,15 @@ export function mountApp(deps: AppDeps): () => void {
       (view) => !before.open.some((open) => open.eventId === view.event.id),
     );
     if (appeared.length > 0) sound.play(appeared.some((view) => view.urgent) ? 'urgent' : 'event');
+    for (const view of appeared) {
+      playView?.toast(
+        `${view.urgent ? '‼️' : '❗'} ${view.event.title}（${ZONES[view.zone].label}）`,
+        view.urgent ? 'urgent' : 'event',
+      );
+    }
+    const lapsed = after.log.slice(before.log.length).filter((entry) => entry.style === 'lapse');
+    for (const entry of lapsed) playView?.toast(`⏰ ${entry.text}`, 'bad');
+    if (lapsed.length > 0) sound.play('bad');
 
     const world = after.log.slice(before.log.length).filter((entry) => WORLD_STYLES.has(entry.style));
     if (world.length > 0) {
@@ -148,10 +186,11 @@ export function mountApp(deps: AppDeps): () => void {
     }
   }
 
-  const lastEntry = (state: GameState): { readonly text: string; readonly money: number } => {
-    const entry = state.log.at(-1);
-    return { text: entry?.text ?? '', money: entry?.money ?? 0 };
-  };
+  /** What the player's own action just did, even if the world answered in the same breath. */
+  const lastEntry = (): { readonly text: string; readonly money: number } => ({
+    text: latest?.text ?? '',
+    money: latest?.money ?? 0,
+  });
 
   const startDay = (): void => {
     ctaAcknowledged = false;
@@ -169,6 +208,7 @@ export function mountApp(deps: AppDeps): () => void {
       onBreathe: breathe,
       onChore: chore,
       onGuide: showGuide,
+      onGoto: gotoZone,
       onContinue: proceed,
       onFinish: finishDay,
       onStick: (x, z) => {
@@ -195,14 +235,20 @@ export function mountApp(deps: AppDeps): () => void {
     const next = step({ kind: 'choose', choiceId });
     if (next === null) return;
     reaction = reactionFor(event, choiceId);
-    const result = lastEntry(next);
+    const result = lastEntry();
     // The world may already have a card up (the day ended while talking); keep that one.
     outcome ??= result;
     sound.play(result.money !== 0 ? 'coin' : 'good');
     refresh();
   }
 
+  function clearCall(): void {
+    for (const timer of call.timers) window.clearTimeout(timer);
+    call = { state: 'none', banner: null, timers: [] };
+  }
+
   function closeMinigame(): void {
+    clearCall();
     if (minigame === null) return;
     minigame.dispose();
     minigame.element.remove();
@@ -224,16 +270,64 @@ export function mountApp(deps: AppDeps): () => void {
       reducedMotion: deps.reducedMotion(),
       random: Math.random,
       onDone: (score) => {
+        const interrupt: ChoreInterrupt =
+          call.state === 'waiting' || call.state === 'ignored' ? 'ignored' : 'none';
         closeMinigame();
-        const next = step({ kind: 'chore', score });
+        const next = step({ kind: 'chore', score, interrupt });
         if (next === null) return;
-        outcome ??= lastEntry(next);
+        outcome ??= lastEntry();
         sound.play(score >= 0.4 ? 'good' : 'bad');
         refresh();
       },
       onCancel: closeMinigame,
     });
     playView.element.append(minigame.element);
+    scheduleCall(minigame.element);
+    refresh();
+  }
+
+  /** Sometimes a kid calls halfway through: keep going, or drop everything and go. */
+  function scheduleCall(host: HTMLElement): void {
+    if (deps.minutesPerSecond <= 0 || Math.random() >= CHORE_INTERRUPT_CHANCE) return;
+    const delay = (CALL_AT_S.min + Math.random() * (CALL_AT_S.max - CALL_AT_S.min)) * 1000;
+    call.timers.push(
+      window.setTimeout(() => {
+        const line = CALL_LINES[Math.floor(Math.random() * CALL_LINES.length)] ?? CALL_LINES[0] ?? '';
+        const banner = document.createElement('div');
+        banner.className = 'mg-call';
+        banner.setAttribute('role', 'alert');
+        const text = document.createElement('p');
+        text.textContent = line;
+        const go = document.createElement('button');
+        go.className = 'primary';
+        go.textContent = '放下手邊的事，過去看看 (Q)';
+        go.addEventListener('click', answerCall);
+        banner.append(text, go);
+        host.append(banner);
+        call.banner = banner;
+        call.state = 'waiting';
+        sound.play('urgent');
+        call.timers.push(
+          window.setTimeout(() => {
+            if (call.state !== 'waiting') return;
+            call.state = 'ignored';
+            banner.remove();
+          }, CALL_WAIT_MS),
+        );
+      }, delay),
+    );
+  }
+
+  /** The parent leaves the chore half done to see what the shout was about. */
+  function answerCall(): void {
+    if (call.state !== 'waiting' || minigame === null) return;
+    closeMinigame();
+    const next = step({ kind: 'chore', score: ANSWERED_SCORE, interrupt: 'answered' });
+    if (next === null) return;
+    outcome ??= lastEntry();
+    sound.play('bad');
+    const target = nextUp(next);
+    if (target !== null) guide = target.zone;
     refresh();
   }
 
@@ -247,7 +341,7 @@ export function mountApp(deps: AppDeps): () => void {
     if (!careAt(game).includes(id) || careStatus(game, id) !== 'ok') return;
     const next = step({ kind: 'care', care: id });
     if (next === null) return;
-    outcome ??= lastEntry(next);
+    outcome ??= lastEntry();
     sound.play('care');
     refresh();
   }
@@ -256,7 +350,7 @@ export function mountApp(deps: AppDeps): () => void {
     if (game === null || outcome !== null || game.pending !== null) return;
     const next = step({ kind: 'breathe' });
     if (next === null) return;
-    outcome ??= lastEntry(next);
+    outcome ??= lastEntry();
     sound.play('good');
     refresh();
   }
@@ -267,6 +361,14 @@ export function mountApp(deps: AppDeps): () => void {
     if (target === null) return;
     guide = target.zone;
     stage.walkTo(target.zone);
+    refresh();
+  }
+
+  /** Walk to a room picked from the to-do list. */
+  function gotoZone(zone: ZoneId): void {
+    if (game === null || outcome !== null || game.pending !== null || minigame !== null) return;
+    guide = zone;
+    stage.walkTo(zone);
     refresh();
   }
 
@@ -318,7 +420,10 @@ export function mountApp(deps: AppDeps): () => void {
     sound.unlock();
     const key = event.key.toLowerCase();
     if (minigame !== null) {
-      if (minigame.handleKey(key)) event.preventDefault();
+      if (key === 'q' && call.state === 'waiting') {
+        event.preventDefault();
+        answerCall();
+      } else if (minigame.handleKey(key)) event.preventDefault();
       return;
     }
     if (outcome !== null) {
@@ -366,6 +471,25 @@ export function mountApp(deps: AppDeps): () => void {
   };
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('pointerdown', onPointerDown);
+
+  // --- The running clock -------------------------------------------------------
+  let lastCheck = performance.now();
+  let carry = 0;
+
+  /** Turns real time into game minutes. Stands still whenever the player is deciding something. */
+  function runClock(): void {
+    const now = performance.now();
+    const seconds = Math.min(MAX_CLOCK_GAP_S, (now - lastCheck) / 1000);
+    lastCheck = now;
+    if (deps.minutesPerSecond <= 0 || screen.tag !== 'play' || game === null) return;
+    if (game.pending !== null || outcome !== null || game.finished || minigame !== null) return;
+    carry += seconds * deps.minutesPerSecond;
+    const minutes = Math.floor(carry);
+    if (minutes < 1) return;
+    carry -= minutes;
+    step({ kind: 'tick', minutes });
+  }
+  const clockTimer = window.setInterval(runClock, CLOCK_CHECK_MS);
 
   const resultActions = (summary: Summary) => {
     const text = buildShareText(summary, config.siteUrl);
@@ -489,6 +613,8 @@ export function mountApp(deps: AppDeps): () => void {
   return () => {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('pointerdown', onPointerDown);
+    window.clearInterval(clockTimer);
+    clearCall();
     introView?.dispose();
     stage.stop();
   };

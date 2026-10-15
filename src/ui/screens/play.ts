@@ -3,10 +3,11 @@ import { formatClock, minutesUntilEnd, dayProgress } from '../../engine/clock';
 import { BLADDER_DISTRACTED, BREATH_MINUTES, MONEY_STRESS_BELOW } from '../../engine/constants';
 import { CHORE_META } from '../../data/chores';
 import { careAt, careStatus, choreAt, interactionAt } from '../../engine/game';
+import { todoList, type TodoItem } from '../../engine/todo';
 import { KIDS } from '../../data/meta';
 import { eventById } from '../../data/deck';
 import { ZONES } from '../../engine/world';
-import { KID_IDS, type CareId, type EventChoice, type GameState, type NextUp } from '../../engine/types';
+import { KID_IDS, type CareId, type EventChoice, type GameState, type NextUp, type ZoneId } from '../../engine/types';
 import { kidCard, meter } from '../components';
 import { h } from '../dom';
 
@@ -32,15 +33,57 @@ export interface PlayHandlers {
   readonly onBreathe: () => void;
   readonly onChore: () => void;
   readonly onGuide: () => void;
+  /** Walk to a room picked from the to-do list. */
+  readonly onGoto: (zone: ZoneId) => void;
   readonly onContinue: () => void;
   readonly onFinish: () => void;
   readonly onStick: (x: number, z: number) => void;
   readonly onToggleMute: () => void;
 }
 
+export type ToastTone = 'urgent' | 'event' | 'bad';
+
 export interface PlayView {
   readonly element: HTMLElement;
   update(ui: PlayUi): void;
+  /** A short message that fades by itself and never blocks play. */
+  toast(text: string, tone: ToastTone): void;
+}
+
+/** How long a toast stays on screen. */
+const TOAST_MS = 5500;
+/** Most toasts shown at once; older ones are dropped. */
+const MAX_TOASTS = 4;
+
+const todoIcon = (item: TodoItem): string =>
+  item.kind === 'body' ? '🫠' : item.kind === 'task' ? '🧒' : item.urgent ? '‼️' : '❗';
+
+function todoRow(item: TodoItem, onGoto: (zone: ZoneId) => void): HTMLElement {
+  const over = item.left !== null && item.left < 0;
+  const ratio = item.left === null || item.span === null ? 1 : Math.min(1, Math.max(0, item.left / item.span));
+  const fill = h('div', { className: `todo__fill${ratio < 0.3 ? ' todo__fill--low' : ''}${over ? ' todo__fill--over' : ''}` });
+  fill.style.width = `${Math.round((over ? 1 : ratio) * 100)}%`;
+  const left =
+    item.left === null ? '' : over ? '逾時' : item.left >= 60 ? `${Math.floor(item.left / 60)}時${item.left % 60}分` : `${item.left} 分`;
+  return h(
+    'button',
+    {
+      className: `todo__row todo__row--${item.kind}${item.urgent ? ' todo__row--urgent' : ''}`,
+      onClick: () => {
+        onGoto(item.zone);
+      },
+      attrs: { 'data-zone': item.zone, title: '點一下，我帶你過去' },
+    },
+    h('span', { className: 'todo__icon' }, todoIcon(item)),
+    h(
+      'span',
+      { className: 'todo__main' },
+      h('span', { className: 'todo__title' }, item.title),
+      h('span', { className: 'todo__detail' }, item.progress === null ? item.detail : `${item.detail}・完成 ${item.progress}%`),
+    ),
+    h('span', { className: 'todo__left' }, left),
+    item.left !== null && fill,
+  );
 }
 
 const money = (n: number): string => `NT$ ${n.toLocaleString('en-US')}`;
@@ -74,6 +117,8 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
   const dock = slot('dock');
   const sheet = slot('sheet');
   const toolbar = slot('toolbar');
+  const todo = slot('todo', 'section');
+  const toasts = h('div', { className: 'toasts', attrs: { 'aria-live': 'polite' } });
 
   // Joystick for touch screens: pointer position inside the pad becomes a movement vector.
   const knob = h('div', { className: 'pad__knob' });
@@ -104,13 +149,14 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
   pad.addEventListener('pointerup', release);
   pad.addEventListener('pointercancel', release);
 
-  const stageBox = h('div', { className: 'playstage' }, stage, toolbar.element, pad);
+  const stageBox = h('div', { className: 'playstage' }, stage, toolbar.element, toasts, pad);
   const element = h(
     'main',
     { className: 'screen screen--play' },
     hud.element,
     stageBox,
     nextUp.element,
+    todo.element,
     dock.element,
     kids.element,
     sheet.element,
@@ -172,8 +218,18 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
       guide === null
         ? [h('span', { className: 'nextup__text' }, '都處理好了，休息一下。')]
         : [
-            h('span', { className: `nextup__text nextup__text--${guide.reason}` }, `${guide.reason === 'urgent' ? '緊急：' : '下一步：'}${guide.text}`),
+            h('span', { className: `nextup__text nextup__text--${guide.reason}` }, `${guide.reason === 'urgent' ? '' : '下一步：'}${guide.text}`),
             h('button', { className: 'secondary nextup__go', onClick: handlers.onGuide }, '帶我去 (G)'),
+          ],
+    );
+
+    const items = todoList(game);
+    todo.set(items.map((item) => `${item.key}:${item.left ?? ''}:${item.progress ?? ''}`).join('|'), () =>
+      items.length === 0
+        ? []
+        : [
+            h('h2', { className: 'todo__heading' }, `現在要處理（${items.length}）`),
+            ...items.slice(0, 7).map((item) => todoRow(item, handlers.onGoto)),
           ],
     );
 
@@ -326,7 +382,17 @@ export function createPlayView(stage: HTMLElement, handlers: PlayHandlers): Play
     );
 
     element.classList.toggle('is-talking', game.pending !== null || outcome !== null);
+    element.classList.toggle('has-alarm', items.some((item) => item.urgent));
   }
 
-  return { element, update };
+  function toast(text: string, tone: ToastTone): void {
+    const note = h('div', { className: `toast toast--${tone}` }, text);
+    toasts.append(note);
+    while (toasts.childElementCount > MAX_TOASTS) toasts.firstElementChild?.remove();
+    window.setTimeout(() => {
+      note.remove();
+    }, TOAST_MS);
+  }
+
+  return { element, update, toast };
 }

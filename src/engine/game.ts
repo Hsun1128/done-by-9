@@ -1,5 +1,6 @@
 import { OPENING_EVENT_ID } from '../data/daytime';
-import { checkinFor, eventById, SPAWNABLE_EVENTS } from '../data/deck';
+import { checkinFor, eventById, MESS_EVENTS, SPAWNABLE_EVENTS } from '../data/deck';
+import { CUT_SHORT_LINES } from '../data/mess';
 import { choreText } from '../data/chores';
 import { KIDS, TASKS } from '../data/meta';
 import { REACTIONS } from '../data/reactions';
@@ -7,6 +8,15 @@ import { CARE_TEXT, DOZE_TEXT } from '../data/selfcare';
 import { TEMPERAMENT } from '../data/styles';
 import {
   ATTENTION_AFTER_MIN,
+  CARE_INTERRUPT_CHANCE,
+  IGNORED_CALL_MOOD,
+  IGNORED_CALL_PATIENCE,
+  INTERRUPTED_SHARE,
+  MAX_OPEN_MESS,
+  MESS_CHANCE_PER_MIN,
+  MESS_COOLDOWN,
+  OVERDUE_MOOD_LOSS_PER_MIN,
+  TASK_DUE_AFTER,
   TASK_RELEASE,
   BLADDER_DISTRACTED,
   BLADDER_RISE_PER_MIN,
@@ -62,6 +72,7 @@ import {
   KID_IDS,
   TASK_ORDER,
   type CareId,
+  type ChoreInterrupt,
   type ChoreOffer,
   type EventChoice,
   type GameEvent,
@@ -330,6 +341,7 @@ function affectedKids(event: GameEvent): readonly KidId[] {
 
 /** A scripted event is moot once the thing it was about has finished by itself. */
 function stillRelevant(state: Pick<GameState, 'kids' | 'clock'>, event: GameEvent): boolean {
+  if (event.repeatable) return true;
   switch (event.target.kind) {
     case 'task':
       return activeTask(state.kids[event.target.kid], state.clock) === event.target.task;
@@ -414,6 +426,41 @@ function spawnEvent(state: Draft): void {
   state.seenEvents.push(chosen.id);
 }
 
+/** Opens one household mishap: random, unless `force` is set it respects the cap on open mess. */
+function spawnMess(state: Draft, force: boolean): boolean {
+  const openMess = state.open.filter((open) => eventById(open.eventId).repeatable).length;
+  if (!force && openMess >= MAX_OPEN_MESS) return false;
+  const recent = state.seenEvents.slice(-MESS_COOLDOWN);
+  const candidates = MESS_EVENTS.filter(
+    (event) =>
+      !state.open.some((open) => open.eventId === event.id) &&
+      !recent.includes(event.id) &&
+      !(event.urgent && state.open.some((open) => eventById(open.eventId).urgent)),
+  );
+  if (candidates.length === 0) return false;
+  const pick = pickIndex(state.rng, candidates.length);
+  state.rng = pick.state;
+  const chosen = candidates[pick.index];
+  if (chosen === undefined) return false;
+  state.open.push({ eventId: chosen.id, appeared: state.clock, expires: state.clock + chosen.ttl });
+  state.seenEvents.push(chosen.id);
+  return true;
+}
+
+function maybeSpawnMess(state: Draft): void {
+  const roll = nextRandom(state.rng);
+  state.rng = roll.state;
+  if (roll.value < MESS_CHANCE_PER_MIN) spawnMess(state, false);
+}
+
+/** The kids cut a break, a meal or a chore short. Returns the line to append to what happened. */
+function interruptWith(state: Draft): string {
+  const line = pickIndex(state.rng, CUT_SHORT_LINES.length);
+  state.rng = line.state;
+  spawnMess(state, true);
+  return CUT_SHORT_LINES[line.index] ?? '';
+}
+
 function settle(state: Draft): void {
   if (state.finished) return;
   if (allDone(state) || state.clock >= DAY_END_MIN || state.collapses >= MAX_COLLAPSES) {
@@ -473,9 +520,13 @@ function tick(state: Draft): void {
     if (state.clock - kid.lastAttended > ATTENTION_AFTER_MIN) {
       kid.mood = Math.max(0, kid.mood - UNATTENDED_MOOD_LOSS_PER_MIN);
     }
+    if (state.clock > TASK_RELEASE[task] + TASK_DUE_AFTER[task]) {
+      kid.mood = Math.max(0, kid.mood - OVERDUE_MOOD_LOSS_PER_MIN);
+    }
   }
   lapseOpenEvents(state);
   spawnEvent(state);
+  maybeSpawnMess(state);
 }
 
 /** Lets `minutes` game minutes pass: bodies tire, kids drift, events appear and lapse. */
@@ -506,6 +557,16 @@ function walk(state: GameState, units: number): GameState {
   const minutes = Math.floor(total);
   const s = draftOf(state);
   s.walkRemainder = total - minutes;
+  advance(s, minutes);
+  return s;
+}
+
+function tickMinutes(state: GameState, minutes: number): GameState {
+  requireNoEncounter(state, 'let time pass');
+  if (!Number.isInteger(minutes) || minutes < 0) {
+    throw new InvalidActionError(`Cannot let ${minutes} minutes pass`);
+  }
+  const s = draftOf(state);
   advance(s, minutes);
   return s;
 }
@@ -633,22 +694,27 @@ function care(state: GameState, careId: CareId): GameState {
     throw new InvalidActionError(`"${careId}" would not help right now`);
   }
   const s = draftOf(state);
-  s.energy = clamp(s.energy + spec.energy);
-  s.patience = clamp(s.patience + spec.patience);
-  s.fullness = clamp(s.fullness + spec.fullness);
-  s.bladder = clamp(s.bladder + spec.bladder);
+  const cutRoll = nextRandom(s.rng);
+  s.rng = cutRoll.state;
+  const cutShort = cutRoll.value < CARE_INTERRUPT_CHANCE[careId];
+  const share = cutShort ? INTERRUPTED_SHARE : 1;
+  s.energy = clamp(s.energy + spec.energy * share);
+  s.patience = clamp(s.patience + spec.patience * share);
+  s.fullness = clamp(s.fullness + spec.fullness * share);
+  s.bladder = clamp(s.bladder + (spec.bladder < 0 ? spec.bladder * share : spec.bladder));
   if (careId === 'coffee') s.coffees += 1;
   if (careId === 'rest' && spec.bond > 0 && KID_IDS.some((id) => kidZone(s.kids[id], s.clock, id) === 'sofa')) {
     s.bond = clamp(s.bond + spec.bond);
   }
+  const outcome = CARE_TEXT[careId].outcome;
   log(s, {
     eventId: `care:${careId}`,
     actionId: careId,
     style: 'care',
-    text: CARE_TEXT[careId].outcome,
+    text: cutShort ? `${outcome}\n${interruptWith(s)}` : outcome,
     money: 0,
   });
-  advance(s, spec.minutes);
+  advance(s, cutShort ? Math.max(1, Math.ceil(spec.minutes * share)) : spec.minutes);
   return s;
 }
 
@@ -668,7 +734,7 @@ function breathe(state: GameState): GameState {
   return s;
 }
 
-function chore(state: GameState, score: number): GameState {
+function chore(state: GameState, score: number, interrupt: ChoreInterrupt): GameState {
   requireNoEncounter(state, 'do a chore');
   const offer = choreAt(state);
   if (offer === null) throw new InvalidActionError('There is no chore to do here');
@@ -677,7 +743,8 @@ function chore(state: GameState, score: number): GameState {
   }
   const spec = CHORES[offer.task];
   const s = draftOf(state);
-  const gain = Math.round(spec.base + spec.bonus * score);
+  const share = interrupt === 'answered' ? INTERRUPTED_SHARE : 1;
+  const gain = Math.round((spec.base + spec.bonus * score) * share);
   for (const id of offer.kids) {
     const kid = s.kids[id];
     kid.progress[offer.task] = clamp(kid.progress[offer.task] + gain);
@@ -685,18 +752,27 @@ function chore(state: GameState, score: number): GameState {
     kid.discipline = clamp(kid.discipline + spec.discipline);
     kid.lastAttended = s.clock;
   }
-  s.energy = clamp(s.energy + spec.energy);
+  s.energy = clamp(s.energy + spec.energy * share);
   s.patience = clamp(s.patience + Math.round(CHORE_PATIENCE_SWING * (score - 0.5) * 2));
+  let aside = '';
+  if (interrupt !== 'none') {
+    aside = `\n${interruptWith(s)}`;
+    if (interrupt === 'ignored') {
+      s.patience = clamp(s.patience - IGNORED_CALL_PATIENCE);
+      for (const id of KID_IDS) s.kids[id].mood = clamp(s.kids[id].mood - IGNORED_CALL_MOOD);
+      aside += '\n你假裝沒聽見，手上的事繼續做完。';
+    }
+  }
   s.bond = clamp(s.bond + (spec.discipline > 0 ? 1 : 0));
   s.choreScores.push(score);
   log(s, {
     eventId: `chore:${offer.task}`,
     actionId: 'chore',
     style: spec.discipline > 0 ? 'together' : 'do_for',
-    text: choreText(offer.task, score),
+    text: `${choreText(offer.task, score)}${aside}`,
     money: 0,
   });
-  advance(s, spec.minutes);
+  advance(s, Math.max(1, Math.ceil(spec.minutes * share)));
   return s;
 }
 
@@ -716,7 +792,9 @@ export function act(state: GameState, action: PlayerAction): GameState {
     case 'breathe':
       return breathe(state);
     case 'chore':
-      return chore(state, action.score);
+      return chore(state, action.score, action.interrupt ?? 'none');
+    case 'tick':
+      return tickMinutes(state, action.minutes);
     case 'leave':
       return state.pending === null ? state : { ...state, pending: null };
   }

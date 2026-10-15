@@ -111,6 +111,8 @@ export interface GameEvent {
   readonly zone: ZoneId | null;
   /** Red events block everything else until handled. */
   readonly urgent: boolean;
+  /** Household mishaps: they can happen again and again, whoever is (or is not) busy. */
+  readonly repeatable: boolean;
   /** Minutes an appearing event waits before it lapses. Irrelevant for check-ins. */
   readonly ttl: number;
   readonly lapse: Lapse;
@@ -145,6 +147,9 @@ export interface Encounter {
   /** Which open event this answers, or null for a routine check-in. */
   readonly openEventId: string | null;
 }
+
+/** What happened when the kids called for the parent in the middle of a chore. */
+export type ChoreInterrupt = 'none' | 'ignored' | 'answered';
 
 export type LogStyle = Style | 'breathe' | 'care' | 'lapse' | 'doze' | 'forced';
 
@@ -214,7 +219,9 @@ export type PlayerAction =
   | { readonly kind: 'care'; readonly care: CareId }
   | { readonly kind: 'breathe' }
   /** Do the chore of the task in this room by hand. `score` (0-1) is how well the little game went. */
-  | { readonly kind: 'chore'; readonly score: number }
+  | { readonly kind: 'chore'; readonly score: number; readonly interrupt?: ChoreInterrupt }
+  /** Real time passes: `minutes` whole game minutes, charged by the app's clock instead of by walking. */
+  | { readonly kind: 'tick'; readonly minutes: number }
   /** Close the conversation without choosing. Costs no time. */
   | { readonly kind: 'leave' };
 

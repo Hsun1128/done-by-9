@@ -740,10 +740,11 @@ button:disabled {
     padding: 16px 24px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 380px;
-    grid-template-rows: auto auto auto 1fr;
+    grid-template-rows: auto auto auto auto 1fr;
     grid-template-areas:
       'stage hud'
       'stage nextup'
+      'stage todo'
       'stage dock'
       'stage kids';
     column-gap: 20px;
@@ -760,6 +761,9 @@ button:disabled {
   }
   .screen--play > .nextup {
     grid-area: nextup;
+  }
+  .screen--play > .todo {
+    grid-area: todo;
   }
   .screen--play > .dock {
     grid-area: dock;
@@ -925,4 +929,165 @@ button:disabled {
   background: rgba(20, 24, 40, 0.35);
   pointer-events: none;
   z-index: 1;
+}
+
+/* --- To-do list, toasts and the alarm -------------------------------------------- */
+.todo:empty {
+  display: none;
+}
+.todo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+}
+.todo__heading {
+  margin: 0 2px 2px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.todo__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 11px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.todo__row--urgent {
+  background: rgba(255, 107, 107, 0.22);
+  border-color: #ff6b6b;
+  animation: alarm-pulse 1s ease-in-out infinite;
+}
+.todo__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.todo__title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.todo__detail {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.todo__left {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.todo__fill {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  background: #8fd0a0;
+  transition: width 0.4s linear;
+}
+.todo__fill--low {
+  background: #ffb86b;
+}
+.todo__fill--over {
+  background: #ff6b6b;
+}
+
+.toasts {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(70%, 360px);
+  pointer-events: none;
+}
+.toast {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(24, 20, 44, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  animation: toast-in 0.25s ease-out;
+}
+.toast--urgent {
+  background: rgba(176, 40, 40, 0.95);
+  border-color: #ff9d9d;
+  font-weight: 700;
+}
+.toast--bad {
+  border-color: #ffb86b;
+}
+
+.has-alarm .playstage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 4px rgba(255, 80, 80, 0.85), inset 0 0 60px rgba(255, 60, 60, 0.45);
+  pointer-events: none;
+  animation: alarm-pulse 1s ease-in-out infinite;
+}
+
+.mg-call {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  width: min(92%, 420px);
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(176, 40, 40, 0.97);
+  border: 2px solid #ffb4b4;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+  animation: toast-in 0.2s ease-out;
+}
+.mg-call p {
+  margin: 0;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+@keyframes alarm-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo__row--urgent,
+  .has-alarm .playstage::after {
+    animation: none;
+  }
 }

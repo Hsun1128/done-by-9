@@ -117,6 +117,7 @@ function buildCheckin(kid: KidId, task: TaskId): GameEvent {
     target: { kind: 'task', kid, task },
     zone: null,
     urgent: false,
+    repeatable: false,
     ttl: 0,
     lapse: { text: '', mood: 0, patience: 0, money: 0, tomorrow: null },
     window: { from: DAY_START_MIN, to: 24 * 60 },
